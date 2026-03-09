@@ -116,19 +116,33 @@ wss.on('connection', (ws, req) => {
                 const x = Math.floor(data.x);
                 const y = Math.floor(data.y);
                 const color = data.color;
+                const size = parseInt(data.size) || 1; // Taille par défaut à 1
 
-                if (isNaN(x) || isNaN(y) || x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT) return;
+                // Validation stricte incluant la taille et permettant un léger débordement visuel hors écran
+                if (![1, 2, 4, 6, 8].includes(size)) return;
+                if (isNaN(x) || isNaN(y) || x < -10 || x >= BOARD_WIDTH || y < -10 || y >= BOARD_HEIGHT) return;
                 if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
 
                 const { r, g, b } = hexToRgb(color);
-                const idx = (y * BOARD_WIDTH + x) * 3;
-                board[idx] = r;
-                board[idx + 1] = g;
-                board[idx + 2] = b;
+                
+                // Application de la taille du pinceau sur le serveur
+                for (let i = 0; i < size; i++) {
+                    for (let j = 0; j < size; j++) {
+                        const px = x + i;
+                        const py = y + j;
+                        // Ne peint que ce qui est réellement sur la toile
+                        if (px >= 0 && px < BOARD_WIDTH && py >= 0 && py < BOARD_HEIGHT) {
+                            const idx = (py * BOARD_WIDTH + px) * 3;
+                            board[idx] = r;
+                            board[idx + 1] = g;
+                            board[idx + 2] = b;
+                        }
+                    }
+                }
 
                 cooldowns.set(ip, now);
 
-                const broadcastMsg = JSON.stringify({ type: 'pixel', x, y, color });
+                const broadcastMsg = JSON.stringify({ type: 'pixel', x, y, color, size });
                 wss.clients.forEach(client => {
                     if (client.readyState === ws.OPEN) client.send(broadcastMsg);
                 });
@@ -178,6 +192,9 @@ const FRONTEND_HTML = `
         .tool-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 50%; width: 45px; height: 45px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; transition: all 0.2s; outline: none; padding: 0; }
         .tool-btn:hover { background: rgba(255,255,255,0.2); }
         .tool-btn.active { background: rgba(76, 175, 80, 0.5); border-color: #4caf50; box-shadow: 0 0 10px rgba(76, 175, 80, 0.5); }
+        
+        #brushSize { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 15px; font-weight: bold; outline: none; border-radius: 8px; padding: 5px 10px; cursor: pointer; height: 40px; }
+        #brushSize option { background: #1a1a1a; }
 
         /* Zoom */
         .icon-btn { font-size: 18px; cursor: pointer; transition: transform 0.1s; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; color: white;}
@@ -221,6 +238,13 @@ const FRONTEND_HTML = `
 
             <div class="hud-group">
                 <button id="btnBrush" class="tool-btn active" title="Pinceau">🖌️</button>
+                <select id="brushSize" title="Taille du pinceau">
+                    <option value="1">1x1</option>
+                    <option value="2">2x2</option>
+                    <option value="4">4x4</option>
+                    <option value="6">6x6</option>
+                    <option value="8">8x8</option>
+                </select>
                 <button id="btnPipette" class="tool-btn" title="Pipette">💧</button>
                 <div id="color-btn-indicator" style="background-color: #ff0000;" title="Choisir une couleur"></div>
                 <button id="exportBtn" class="tool-btn" title="Exporter la toile en PNG">💾</button>
@@ -240,6 +264,7 @@ const FRONTEND_HTML = `
         const ctx = canvas.getContext('2d', { alpha: false });
         
         const btnBrush = document.getElementById('btnBrush');
+        const brushSizeSelect = document.getElementById('brushSize');
         const btnPipette = document.getElementById('btnPipette');
         const colorBtnIndicator = document.getElementById('color-btn-indicator');
         const colorPanel = document.getElementById('colorPanel');
@@ -275,8 +300,11 @@ const FRONTEND_HTML = `
         
         let currentTool = 'brush'; 
         let currentColor = '#ff0000';
+        let currentSize = 1;
         let pendingQueue = []; 
         let lastSendTime = 0;
+        let hoverX = -1;
+        let hoverY = -1;
 
         // --- GESTION DES COULEURS (Roue iro.js) ---
         var colorPicker = new iro.ColorPicker("#colorPickerWheel", {
@@ -308,6 +336,8 @@ const FRONTEND_HTML = `
             if (!val.startsWith('#')) val = '#' + val;
             if (/^#[0-9a-fA-F]{6}$/.test(val)) updateColor(val);
         });
+
+        brushSizeSelect.addEventListener('change', (e) => currentSize = parseInt(e.target.value));
 
         colorBtnIndicator.addEventListener('click', () => {
             colorPanel.style.display = colorPanel.style.display === 'flex' ? 'none' : 'flex';
@@ -424,6 +454,11 @@ const FRONTEND_HTML = `
                 if(bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
                     valX.innerText = bx;
                     valY.innerText = by;
+                    hoverX = bx;
+                    hoverY = by;
+                } else {
+                    hoverX = -1;
+                    hoverY = -1;
                 }
             }
 
@@ -444,6 +479,10 @@ const FRONTEND_HTML = `
 
         window.addEventListener('mouseup', () => {
             isPanning = false; isPainting = false;
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            hoverX = -1; hoverY = -1; draw();
         });
 
         window.addEventListener('touchend', (e) => {
@@ -476,7 +515,15 @@ const FRONTEND_HTML = `
 
             for (const p of pendingQueue) {
                 ctx.fillStyle = p.color;
-                ctx.fillRect(p.x + 0.1, p.y + 0.1, 0.8, 0.8);
+                ctx.fillRect(p.x + 0.1, p.y + 0.1, p.size - 0.2, p.size - 0.2);
+            }
+
+            // Prévisualisation du pinceau (Hover)
+            if (hoverX >= 0 && currentTool === 'brush' && !isPanning) {
+                const offset = Math.floor(currentSize / 2);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.lineWidth = 1 / scale; // Garde une bordure d'1 pixel constant peu importe le zoom
+                ctx.strokeRect(hoverX - offset, hoverY - offset, currentSize, currentSize);
             }
             
             ctx.restore();
@@ -492,10 +539,11 @@ const FRONTEND_HTML = `
                 const data = JSON.parse(event.data);
                 
                 if (data.type === 'pixel') {
+                    const dataSize = data.size || 1;
                     offCtx.fillStyle = data.color;
-                    offCtx.fillRect(data.x, data.y, 1, 1);
+                    offCtx.fillRect(data.x, data.y, dataSize, dataSize);
                     
-                    pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.color.toLowerCase() === data.color.toLowerCase()));
+                    pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.size === dataSize && p.color.toLowerCase() === data.color.toLowerCase()));
                     draw();
                 } else if (data.type === 'error') {
                     // Les retries sont gérés ci-dessous
@@ -513,13 +561,19 @@ const FRONTEND_HTML = `
 
         function placePixel(bx, by) {
             if (pendingQueue.length > 500) return;
-            const existing = pendingQueue.find(p => p.x === bx && p.y === by);
+            
+            // Calculer l'origine du bloc (en haut à gauche) en fonction du clic (centre)
+            const offset = Math.floor(currentSize / 2);
+            const startX = bx - offset;
+            const startY = by - offset;
+
+            const existing = pendingQueue.find(p => p.x === startX && p.y === startY && p.size === currentSize);
             
             if (existing) {
                 existing.color = currentColor;
                 existing.retries = 0;
             } else {
-                pendingQueue.push({ x: bx, y: by, color: currentColor, retries: 0 });
+                pendingQueue.push({ x: startX, y: startY, color: currentColor, size: currentSize, retries: 0 });
             }
             draw();
         }
@@ -537,7 +591,7 @@ const FRONTEND_HTML = `
                         return;
                     }
 
-                    ws.send(JSON.stringify({ type: 'pixel', x: p.x, y: p.y, color: p.color }));
+                    ws.send(JSON.stringify({ type: 'pixel', x: p.x, y: p.y, color: p.color, size: p.size }));
                     lastSendTime = now;
                 }
             }
