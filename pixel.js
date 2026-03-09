@@ -15,7 +15,7 @@ const PORT = 80;
 const BOARD_WIDTH = 1000;
 const BOARD_HEIGHT = 1000;
 const BOARD_SIZE = BOARD_WIDTH * BOARD_HEIGHT * 3; // 3 octets par pixel (RGB)
-const COOLDOWN_MS = 500; // 0.5 seconde
+const COOLDOWN_MS = 100; // 0.1 seconde
 const BOARD_FILE = path.join(__dirname, 'board.dat');
 
 // --- ÉTAT DU SERVEUR ---
@@ -366,7 +366,8 @@ const FRONTEND_HTML = `
             offsetY = mouseY - (mouseY - offsetY) * zoomFactor;
             scale *= zoomFactor;
             
-            scale = Math.max(0.1, Math.min(scale, 40)); 
+            // Limité à 30 pour éviter le bug d'écran noir (limite du navigateur à ~32767 pixels)
+            scale = Math.max(0.1, Math.min(scale, 30)); 
             draw();
         }, {passive: false});
 
@@ -459,11 +460,11 @@ const FRONTEND_HTML = `
             draw();
         }
 
-        // Boucle d'envoi automatique au serveur (1 pixel toutes les 550ms)
+        // Boucle d'envoi automatique au serveur (1 pixel toutes les 110ms)
         setInterval(() => {
             const now = Date.now();
-            // On utilise 550ms pour être parfaitement sûr de passer le contrôle de 500ms du serveur
-            if (pendingQueue.length > 0 && now - lastSendTime >= 550) {
+            // On utilise 110ms pour être parfaitement sûr de passer le contrôle de 100ms du serveur
+            if (pendingQueue.length > 0 && now - lastSendTime >= 110) {
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     const p = pendingQueue[0]; // Récupère le pixel le plus ancien
                     
@@ -480,12 +481,12 @@ const FRONTEND_HTML = `
                     cooldownBar.style.transition = 'none';
                     cooldownBar.style.width = '0%';
                     setTimeout(() => {
-                        cooldownBar.style.transition = 'width 0.5s linear';
+                        cooldownBar.style.transition = 'width 0.1s linear';
                         cooldownBar.style.width = '100%';
                     }, 10);
                 }
             }
-        }, 50); // Vérification de la file très récurrente
+        }, 10); // Vérification de la file très récurrente (passée à 10ms pour plus de réactivité)
 
         exportBtn.addEventListener('click', () => {
             const link = document.createElement('a');
