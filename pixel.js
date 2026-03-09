@@ -215,9 +215,24 @@ const FRONTEND_HTML = `
         #colorPanel { display: none; position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%); background: rgba(20, 20, 20, 0.95); padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(15px); flex-direction: column; align-items: center; gap: 15px; box-shadow: 0 15px 40px rgba(0,0,0,0.8); z-index: 10; }
         #hexInput { width: 90px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 16px; font-weight: bold; text-transform: uppercase; outline: none; border-radius: 8px; padding: 8px; text-align: center; }
 
-        /* Editeur 10x10 Custom Brush */
+        /* Editeur 10x10 Custom Brush avec effet d'agrandissement */
         #brushEditorContainer { display: none; background: #222; padding: 6px; border-radius: 8px; border: 1px solid #444; }
-        #brushEditor { display: grid; grid-template-columns: repeat(10, 1fr); width: 60px; height: 60px; background: #ccc; gap: 1px; border: 1px solid #555; cursor: crosshair; touch-action: none; }
+        #brushEditorWrapper { width: 60px; height: 60px; position: relative; }
+        #brushEditor { 
+            position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+            display: grid; grid-template-columns: repeat(10, 1fr); 
+            width: 60px; height: 60px; background: #ccc; gap: 1px; border: 1px solid #555; 
+            cursor: crosshair; touch-action: none; 
+            transition: width 0.2s ease, height 0.2s ease;
+        }
+        #brushEditorContainer:hover #brushEditor,
+        #brushEditor.expanded {
+            width: 180px; height: 180px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+            border: 2px solid #888;
+            border-radius: 4px;
+            z-index: 50;
+        }
         .brush-cell { background: white; width: 100%; height: 100%; user-select: none; }
         .brush-cell.active { background: black; }
 
@@ -276,9 +291,11 @@ const FRONTEND_HTML = `
                 <button id="btnBrushNormal" class="tool-btn tool-btn-txt active" title="Pinceau 1x1">1x1</button>
                 <button id="btnBrushCustom" class="tool-btn" title="Pinceau Personnalisé">🖌️</button>
                 
-                <!-- Editeur de pinceau custom (apparaît si Custom sélectionné) -->
+                <!-- Editeur de pinceau custom -->
                 <div id="brushEditorContainer">
-                    <div id="brushEditor"></div>
+                    <div id="brushEditorWrapper">
+                        <div id="brushEditor"></div>
+                    </div>
                 </div>
 
                 <button id="btnPipette" class="tool-btn" title="Pipette">💧</button>
@@ -370,6 +387,16 @@ const FRONTEND_HTML = `
         let isEditingBrush = false;
         let brushPaintMode = true; // true = noir, false = blanc
 
+        // Logique d'agrandissement (Desktop & Mobile)
+        brushEditorContainer.addEventListener('mouseenter', () => brushEditor.classList.add('expanded'));
+        brushEditorContainer.addEventListener('mouseleave', () => brushEditor.classList.remove('expanded'));
+
+        document.addEventListener('touchstart', (e) => {
+            if (!brushEditorContainer.contains(e.target) && !btnBrushCustom.contains(e.target)) {
+                brushEditor.classList.remove('expanded');
+            }
+        }, {passive: true});
+
         function setBrushCell(idx, state) {
             if (idx >= 0 && idx < 100) {
                 customBrush[idx] = state;
@@ -388,6 +415,8 @@ const FRONTEND_HTML = `
         }
 
         brushEditor.addEventListener('mousedown', (e) => {
+            if (!brushEditor.classList.contains('expanded')) brushEditor.classList.add('expanded');
+
             if(e.target.classList.contains('brush-cell')) {
                 isEditingBrush = true;
                 const idx = parseInt(e.target.dataset.index);
@@ -400,6 +429,13 @@ const FRONTEND_HTML = `
 
         brushEditor.addEventListener('touchstart', (e) => {
             e.preventDefault();
+            
+            // Si le pinceau n'était pas agrandi, le premier tap ne fait que l'agrandir (sécurité)
+            if (!brushEditor.classList.contains('expanded')) {
+                brushEditor.classList.add('expanded');
+                return; 
+            }
+
             const touch = e.touches[0];
             const el = document.elementFromPoint(touch.clientX, touch.clientY);
             if (el && el.classList.contains('brush-cell')) {
@@ -880,4 +916,3 @@ const FRONTEND_HTML = `
     </script>
 </body>
 </html>
-`;
