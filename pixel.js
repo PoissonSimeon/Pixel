@@ -15,7 +15,7 @@ const PORT = 80;
 const BOARD_WIDTH = 1000;
 const BOARD_HEIGHT = 1000;
 const BOARD_SIZE = BOARD_WIDTH * BOARD_HEIGHT * 3; // 3 octets par pixel (RGB)
-const COOLDOWN_MS = 100; // 0.1 seconde
+const COOLDOWN_MS = 100; // 0.1 seconde (Limite stricte serveur)
 const BOARD_FILE = path.join(__dirname, 'board.dat');
 
 // --- ÉTAT DU SERVEUR ---
@@ -109,6 +109,7 @@ wss.on('connection', (ws, req) => {
                 const now = Date.now();
                 const lastAction = cooldowns.get(ip) || 0;
 
+                // Vérification anti-spam
                 if (now - lastAction < COOLDOWN_MS) {
                     return ws.send(JSON.stringify({ type: 'error', msg: 'Veuillez patienter.' }));
                 }
@@ -116,21 +117,19 @@ wss.on('connection', (ws, req) => {
                 const x = Math.floor(data.x);
                 const y = Math.floor(data.y);
                 const color = data.color;
-                const size = parseInt(data.size) || 1; // Taille par défaut à 1
+                const size = parseInt(data.size) || 1;
 
-                // Validation stricte incluant la taille et permettant un léger débordement visuel hors écran
                 if (![1, 2, 4, 6, 8].includes(size)) return;
                 if (isNaN(x) || isNaN(y) || x < -10 || x >= BOARD_WIDTH || y < -10 || y >= BOARD_HEIGHT) return;
                 if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
 
                 const { r, g, b } = hexToRgb(color);
                 
-                // Application de la taille du pinceau sur le serveur
+                // Application serveur
                 for (let i = 0; i < size; i++) {
                     for (let j = 0; j < size; j++) {
                         const px = x + i;
                         const py = y + j;
-                        // Ne peint que ce qui est réellement sur la toile
                         if (px >= 0 && px < BOARD_WIDTH && py >= 0 && py < BOARD_HEIGHT) {
                             const idx = (py * BOARD_WIDTH + px) * 3;
                             board[idx] = r;
@@ -172,14 +171,11 @@ const FRONTEND_HTML = `
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; user-select: none; }
         
-        /* Architecture principale : Colonne Flex */
         #app { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
         
-        /* Conteneur de la toile */
         #canvas-wrapper { flex: 1; position: relative; overflow: hidden; background: #1a1a1a; cursor: crosshair; }
         canvas { display: block; touch-action: none; width: 100%; height: 100%; }
         
-        /* Barre d'outils fixe en bas (HUD) */
         #hud { 
             background: #1e1e1e; border-top: 1px solid #333; padding: 12px 20px; 
             display: flex; justify-content: center; align-items: center; 
@@ -188,7 +184,6 @@ const FRONTEND_HTML = `
 
         .hud-group { display: flex; align-items: center; gap: 12px; }
 
-        /* Outils */
         .tool-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 50%; width: 45px; height: 45px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; transition: all 0.2s; outline: none; padding: 0; }
         .tool-btn:hover { background: rgba(255,255,255,0.2); }
         .tool-btn.active { background: rgba(76, 175, 80, 0.5); border-color: #4caf50; box-shadow: 0 0 10px rgba(76, 175, 80, 0.5); }
@@ -196,19 +191,16 @@ const FRONTEND_HTML = `
         #brushSize { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 15px; font-weight: bold; outline: none; border-radius: 8px; padding: 5px 10px; cursor: pointer; height: 40px; }
         #brushSize option { background: #1a1a1a; }
 
-        /* Zoom */
         .icon-btn { font-size: 18px; cursor: pointer; transition: transform 0.1s; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; color: white;}
         .icon-btn:hover { transform: scale(1.2); }
         #zoomSlider { cursor: pointer; width: 100px; accent-color: #4caf50; }
 
-        /* Couleurs */
         #color-btn-indicator { width: 45px; height: 45px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.5); cursor: pointer; box-shadow: 0 0 10px rgba(0,0,0,0.3); transition: transform 0.1s; }
         #color-btn-indicator:hover { transform: scale(1.1); border-color: white; }
 
         #colorPanel { display: none; position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(20, 20, 20, 0.95); padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(15px); flex-direction: column; align-items: center; gap: 15px; box-shadow: 0 15px 40px rgba(0,0,0,0.8); z-index: 10; }
         #hexInput { width: 90px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 16px; font-weight: bold; text-transform: uppercase; outline: none; border-radius: 8px; padding: 8px; text-align: center; }
 
-        /* Panneau d'informations */
         .info-group { color: #fff; font-size: 13px; font-weight: bold; background: rgba(0,0,0,0.3); padding: 8px 15px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.05); display: flex; gap: 15px; }
         .info-group span { display: flex; align-items: center; gap: 5px; }
         .coords { color: #aaa; width: 90px; }
@@ -218,7 +210,6 @@ const FRONTEND_HTML = `
 </head>
 <body>
     <div id="app">
-        <!-- Zone dédiée au dessin et au panneau de couleur (Isolée) -->
         <div id="canvas-wrapper">
             <canvas id="viewCanvas"></canvas>
             
@@ -228,7 +219,6 @@ const FRONTEND_HTML = `
             </div>
         </div>
 
-        <!-- HUD Fixe en bas -->
         <div id="hud">
             <div class="hud-group">
                 <span class="icon-btn" id="zoomOutBtn" title="Dézoom max">➖</span>
@@ -291,7 +281,6 @@ const FRONTEND_HTML = `
         offCanvas.height = SIZE;
         const offCtx = offCanvas.getContext('2d', { alpha: false });
 
-        // Nouveaux indicateurs d'interaction stricts
         let isPanning = false;
         let isPainting = false;
         let isMoved = false;
@@ -306,7 +295,7 @@ const FRONTEND_HTML = `
         let hoverX = -1;
         let hoverY = -1;
 
-        // --- GESTION DES COULEURS (Roue iro.js) ---
+        // --- GESTION DES COULEURS ---
         var colorPicker = new iro.ColorPicker("#colorPickerWheel", {
             width: 150,
             color: currentColor,
@@ -343,7 +332,6 @@ const FRONTEND_HTML = `
             colorPanel.style.display = colorPanel.style.display === 'flex' ? 'none' : 'flex';
         });
 
-        // Fermeture automatique du panneau au clic sur la toile
         canvas.addEventListener('mousedown', () => {
             if (colorPanel.style.display === 'flex') colorPanel.style.display = 'none';
         });
@@ -384,9 +372,8 @@ const FRONTEND_HTML = `
             applyZoom(scale * zoomFactor, false, pos.canvasX, pos.canvasY);
         }, {passive: false});
 
-        // --- NAVIGATION ET DESSIN STRICTS ---
+        // --- NAVIGATION ET DESSIN ---
         function resize() {
-            // S'adapte exactement au wrapper, excluant le HUD
             canvas.width = wrapper.clientWidth;
             canvas.height = wrapper.clientHeight;
             if(scale === 1 && offsetX === 0 && offsetY === 0) {
@@ -424,7 +411,6 @@ const FRONTEND_HTML = `
             }
         }
 
-        // Ecoute uniquement sur le canvas pour démarrer une action
         canvas.addEventListener('mousedown', (e) => {
             const pos = getEventData(e);
             lastMouseX = pos.screenX; lastMouseY = pos.screenY;
@@ -441,13 +427,12 @@ const FRONTEND_HTML = `
             const pos = getEventData(e);
             lastMouseX = pos.screenX; lastMouseY = pos.screenY;
             isMoved = false;
-            isPanning = true; // Le tactile glisse par défaut (Pan)
+            isPanning = true; 
         }, {passive: false});
 
         function handleMove(e) {
             const pos = getEventData(e);
             
-            // Mise à jour des coordonnées textuelles si au-dessus de la toile
             if (e.target === canvas) {
                 const bx = Math.floor((pos.canvasX - offsetX) / scale);
                 const by = Math.floor((pos.canvasY - offsetY) / scale);
@@ -486,7 +471,6 @@ const FRONTEND_HTML = `
         });
 
         window.addEventListener('touchend', (e) => {
-            // Un tap tactile sans glisser équivaut à un clic de pinceau
             if (isPanning && !isMoved && e.target === canvas) {
                 const pos = getEventData(e);
                 triggerTool(pos.canvasX, pos.canvasY);
@@ -518,11 +502,10 @@ const FRONTEND_HTML = `
                 ctx.fillRect(p.x + 0.1, p.y + 0.1, p.size - 0.2, p.size - 0.2);
             }
 
-            // Prévisualisation du pinceau (Hover)
             if (hoverX >= 0 && currentTool === 'brush' && !isPanning) {
                 const offset = Math.floor(currentSize / 2);
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-                ctx.lineWidth = 1 / scale; // Garde une bordure d'1 pixel constant peu importe le zoom
+                ctx.lineWidth = 1 / scale; 
                 ctx.strokeRect(hoverX - offset, hoverY - offset, currentSize, currentSize);
             }
             
@@ -543,10 +526,11 @@ const FRONTEND_HTML = `
                     offCtx.fillStyle = data.color;
                     offCtx.fillRect(data.x, data.y, dataSize, dataSize);
                     
-                    pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.size === dataSize && p.color.toLowerCase() === data.color.toLowerCase()));
+                    // CORRECTION : Filtre plus robuste pour garantir de ne jamais bloquer la file.
+                    pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.size === dataSize));
                     draw();
                 } else if (data.type === 'error') {
-                    // Les retries sont gérés ci-dessous
+                    // Les erreurs réseau sont silencieusement gérées par le client
                 } else if (data.type === 'stats') {
                     onlineCount.innerText = data.online;
                 }
@@ -562,7 +546,6 @@ const FRONTEND_HTML = `
         function placePixel(bx, by) {
             if (pendingQueue.length > 500) return;
             
-            // Calculer l'origine du bloc (en haut à gauche) en fonction du clic (centre)
             const offset = Math.floor(currentSize / 2);
             const startX = bx - offset;
             const startY = by - offset;
@@ -578,14 +561,16 @@ const FRONTEND_HTML = `
             draw();
         }
 
+        // CORRECTION : Le délai client passe à 130ms (le serveur exige 100ms) pour absorber toutes les latences réseau.
         setInterval(() => {
             const now = Date.now();
-            if (pendingQueue.length > 0 && now - lastSendTime >= 110) {
+            if (pendingQueue.length > 0 && now - lastSendTime >= 130) {
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     const p = pendingQueue[0]; 
                     p.retries = (p.retries || 0) + 1;
 
-                    if (p.retries > 10) {
+                    // CORRECTION : 20 essais max. Si la connexion est instable, on abandonne le pixel au bout de ~2.5s pour débloquer la suite.
+                    if (p.retries > 20) {
                         pendingQueue.shift();
                         draw();
                         return;
