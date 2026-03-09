@@ -28,8 +28,9 @@ try {
         board = fs.readFileSync(BOARD_FILE);
         console.log(`[INIT] Plateau chargé depuis ${BOARD_FILE}`);
     } else {
-        board = Buffer.alloc(BOARD_SIZE, 255); // Blanc
-        console.log('[INIT] Nouveau plateau blanc créé.');
+        board = Buffer.alloc(BOARD_SIZE);
+        board.fill(26); // Remplit avec la couleur #1a1a1a (26 en décimal) par défaut (fond sombre)
+        console.log('[INIT] Nouveau plateau sombre créé.');
     }
 } catch (err) {
     console.error('[ERREUR] Impossible de charger/créer le plateau :', err);
@@ -152,21 +153,24 @@ const FRONTEND_HTML = `
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Pixel - florianscher.fr</title>
+    <!-- Importation de la roue chromatique iro.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@jaames/iro@5"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #1a1a1a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; user-select: none; }
         canvas { display: block; touch-action: none; cursor: crosshair; }
         
-        #ui { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(20, 20, 20, 0.85); padding: 12px 25px; border-radius: 40px; display: flex; gap: 20px; align-items: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); }
-        input[type="color"] { border: none; width: 45px; height: 45px; border-radius: 50%; cursor: pointer; padding: 0; background: transparent; outline: none; }
-        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
-        input[type="color"]::-webkit-color-swatch { border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 10px rgba(0,0,0,0.3); }
-        
-        #hexInput { width: 75px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 14px; font-weight: bold; text-transform: uppercase; outline: none; border-radius: 5px; padding: 5px; text-align: center; }
+        #ui { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(20, 20, 20, 0.85); padding: 12px 25px; border-radius: 40px; display: flex; gap: 20px; align-items: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); z-index: 10; }
         
         .tools { display: flex; gap: 10px; border-right: 1px solid rgba(255,255,255,0.2); padding-right: 20px; }
         .tool-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 50%; width: 45px; height: 45px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; transition: all 0.2s; outline: none; padding: 0; }
         .tool-btn:hover { background: rgba(255,255,255,0.2); }
         .tool-btn.active { background: rgba(76, 175, 80, 0.5); border-color: #4caf50; box-shadow: 0 0 10px rgba(76, 175, 80, 0.5); }
+
+        #color-btn-indicator { width: 45px; height: 45px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.5); cursor: pointer; box-shadow: 0 0 10px rgba(0,0,0,0.3); transition: transform 0.1s; }
+        #color-btn-indicator:hover { transform: scale(1.1); border-color: white; }
+
+        #colorPanel { display: none; position: absolute; bottom: 95px; left: 50%; transform: translateX(-50%); background: rgba(20, 20, 20, 0.95); padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(15px); flex-direction: column; align-items: center; gap: 15px; box-shadow: 0 15px 40px rgba(0,0,0,0.6); z-index: 10; }
+        #hexInput { width: 90px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 16px; font-weight: bold; text-transform: uppercase; outline: none; border-radius: 8px; padding: 8px; text-align: center; }
 
         #exportBtn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 50%; width: 45px; height: 45px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; transition: background 0.2s; outline: none; padding: 0; }
         #exportBtn:hover { background: rgba(255,255,255,0.2); }
@@ -175,8 +179,14 @@ const FRONTEND_HTML = `
         .info-label { font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
         .info-value { font-size: 16px; font-weight: bold; }
         
-        #top-info { position: absolute; top: 15px; right: 15px; background: rgba(20, 20, 20, 0.85); padding: 8px 15px; border-radius: 20px; color: #fff; font-size: 13px; font-weight: bold; display: flex; gap: 15px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); pointer-events: none; }
+        #top-info { position: absolute; top: 15px; right: 15px; background: rgba(20, 20, 20, 0.85); padding: 8px 15px; border-radius: 20px; color: #fff; font-size: 13px; font-weight: bold; display: flex; gap: 15px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); pointer-events: none; z-index: 10; }
         .online-dot { color: #4caf50; }
+
+        /* UI de la barre de Zoom */
+        #zoom-container { position: absolute; bottom: 30px; left: 30px; background: rgba(20, 20, 20, 0.85); padding: 12px 20px; border-radius: 40px; display: flex; align-items: center; gap: 15px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); color: white; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 10; }
+        .zoom-icon { font-size: 18px; cursor: pointer; user-select: none; transition: transform 0.1s; }
+        .zoom-icon:hover { transform: scale(1.2); }
+        #zoomSlider { cursor: pointer; width: 120px; accent-color: #4caf50; }
     </style>
 </head>
 <body>
@@ -187,15 +197,28 @@ const FRONTEND_HTML = `
         <span><span class="online-dot">●</span> <span id="onlineCount">1</span> en ligne</span>
     </div>
 
+    <!-- Interface du Zoom à gauche -->
+    <div id="zoom-container">
+        <span class="zoom-icon" id="zoomOutBtn" title="Dézoom max">➖</span>
+        <input type="range" id="zoomSlider" min="0.1" max="30" step="0.1" value="1">
+        <span class="zoom-icon" id="zoomInBtn" title="Zoom max">➕</span>
+    </div>
+
+    <!-- Menu flottant Roue des Couleurs -->
+    <div id="colorPanel">
+        <div id="colorPickerWheel"></div>
+        <input type="text" id="hexInput" value="#ff0000" maxlength="7">
+    </div>
+
     <div id="ui">
         <div class="tools">
             <button id="btnBrush" class="tool-btn active" title="Pinceau">🖌️</button>
             <button id="btnPipette" class="tool-btn" title="Pipette">💧</button>
         </div>
-        <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
-            <input type="color" id="colorPicker" value="#ff0000">
-            <input type="text" id="hexInput" value="#ff0000" maxlength="7">
-        </div>
+        
+        <!-- Bouton de couleur principal -->
+        <div id="color-btn-indicator" style="background-color: #ff0000;" title="Choisir une couleur"></div>
+        
         <button id="exportBtn" title="Exporter la toile en PNG">💾</button>
         <div class="info-block">
             <span class="info-label">État</span>
@@ -206,10 +229,17 @@ const FRONTEND_HTML = `
     <script>
         const canvas = document.getElementById('viewCanvas');
         const ctx = canvas.getContext('2d', { alpha: false });
-        const colorPicker = document.getElementById('colorPicker');
-        const hexInput = document.getElementById('hexInput');
+        
         const btnBrush = document.getElementById('btnBrush');
         const btnPipette = document.getElementById('btnPipette');
+        const colorBtnIndicator = document.getElementById('color-btn-indicator');
+        const colorPanel = document.getElementById('colorPanel');
+        const hexInput = document.getElementById('hexInput');
+        
+        const zoomSlider = document.getElementById('zoomSlider');
+        const zoomOutBtn = document.getElementById('zoomOutBtn');
+        const zoomInBtn = document.getElementById('zoomInBtn');
+
         const statusEl = document.getElementById('status');
         const valX = document.getElementById('valX');
         const valY = document.getElementById('valY');
@@ -227,36 +257,94 @@ const FRONTEND_HTML = `
         offCanvas.width = SIZE;
         offCanvas.height = SIZE;
         const offCtx = offCanvas.getContext('2d', { alpha: false });
-        let imgData = offCtx.createImageData(SIZE, SIZE);
 
         let isDragging = false;
         let lastMouseX = 0;
         let lastMouseY = 0;
         let isMoved = false;
-        let currentTool = 'brush'; // 'brush' or 'pipette'
+        let currentTool = 'brush'; 
+        let currentColor = '#ff0000';
         
-        let pendingQueue = []; // File d'attente pour les pixels posés localement
+        let pendingQueue = []; 
         let lastSendTime = 0;
 
-        // Synchro de la couleur
+        // --- GESTION DES COULEURS (Roue iro.js) ---
+        var colorPicker = new iro.ColorPicker("#colorPickerWheel", {
+            width: 150,
+            color: currentColor,
+            borderWidth: 2,
+            borderColor: "#ffffff",
+            layout: [
+                { component: iro.ui.Wheel },
+                { component: iro.ui.Slider, options: { sliderType: 'value' } }
+            ]
+        });
+
         function updateColor(hex) {
-            colorPicker.value = hex;
+            currentColor = hex;
+            colorBtnIndicator.style.backgroundColor = hex;
             hexInput.value = hex;
+            colorPicker.color.hexString = hex;
         }
-        colorPicker.addEventListener('input', (e) => updateColor(e.target.value));
+
+        colorPicker.on('color:change', function(color) {
+            currentColor = color.hexString;
+            colorBtnIndicator.style.backgroundColor = currentColor;
+            hexInput.value = currentColor;
+        });
+
         hexInput.addEventListener('input', (e) => {
             let val = e.target.value;
             if (!val.startsWith('#')) val = '#' + val;
             if (/^#[0-9a-fA-F]{6}$/.test(val)) updateColor(val);
         });
 
-        // Gestion des outils
+        // Afficher / Cacher le panneau des couleurs
+        colorBtnIndicator.addEventListener('click', () => {
+            colorPanel.style.display = colorPanel.style.display === 'flex' ? 'none' : 'flex';
+        });
+
+        // Fermer le panneau si on clique ailleurs sur la toile
+        canvas.addEventListener('mousedown', () => {
+            if (colorPanel.style.display === 'flex') colorPanel.style.display = 'none';
+        });
+
+        // --- GESTION DES OUTILS ---
         btnBrush.addEventListener('click', () => { currentTool = 'brush'; btnBrush.classList.add('active'); btnPipette.classList.remove('active'); canvas.style.cursor = 'crosshair'; });
         btnPipette.addEventListener('click', () => { currentTool = 'pipette'; btnPipette.classList.add('active'); btnBrush.classList.remove('active'); canvas.style.cursor = 'crosshair'; });
 
-        // Empêcher le menu contextuel du clic droit (indispensable pour le drag droit)
         canvas.addEventListener('contextmenu', e => e.preventDefault());
 
+        // --- GESTION DU ZOOM ---
+        function applyZoom(newScale, centerOnScreen = false, targetX = 0, targetY = 0) {
+            newScale = Math.max(0.1, Math.min(newScale, 30));
+            const actualZoomFactor = newScale / scale;
+            
+            if (centerOnScreen) {
+                targetX = window.innerWidth / 2;
+                targetY = window.innerHeight / 2;
+            }
+            
+            offsetX = targetX - (targetX - offsetX) * actualZoomFactor;
+            offsetY = targetY - (targetY - offsetY) * actualZoomFactor;
+            scale = newScale;
+            
+            zoomSlider.value = scale;
+            draw();
+        }
+
+        zoomSlider.addEventListener('input', (e) => applyZoom(parseFloat(e.target.value), true));
+        zoomOutBtn.addEventListener('click', () => applyZoom(0.1, true));
+        zoomInBtn.addEventListener('click', () => applyZoom(30, true));
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomSpeed = 0.002;
+            const zoomFactor = Math.exp(e.deltaY * -zoomSpeed);
+            applyZoom(scale * zoomFactor, false, e.clientX, e.clientY);
+        }, {passive: false});
+
+        // --- NAVIGATION ET DESSIN ---
         function resize() {
             canvas.width = window.innerWidth;
             canvas.height = window.innerHeight;
@@ -264,16 +352,14 @@ const FRONTEND_HTML = `
                 scale = Math.min(window.innerWidth / SIZE, window.innerHeight / SIZE) * 0.9;
                 offsetX = (window.innerWidth - (SIZE * scale)) / 2;
                 offsetY = (window.innerHeight - (SIZE * scale)) / 2;
+                zoomSlider.value = scale;
             }
             draw();
         }
         window.addEventListener('resize', resize);
         
         function onPointerDown(e) {
-            // Clic droit (2) ou tactile (touches) pour agripper et bouger
-            if (e.button === 2 || e.touches) {
-                isDragging = true;
-            }
+            if (e.button === 2 || e.touches) isDragging = true;
             isMoved = false;
             lastMouseX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
             lastMouseY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
@@ -288,7 +374,6 @@ const FRONTEND_HTML = `
                 valX.innerText = bx;
                 valY.innerText = by;
                 
-                // Peindre en continu si le clic gauche est maintenu et qu'on ne déplace pas la caméra
                 if (e.buttons === 1 && currentTool === 'brush' && !isDragging && isReady) {
                     placePixel(bx, by);
                 }
@@ -304,13 +389,9 @@ const FRONTEND_HTML = `
             draw();
         }
         function onPointerUp(e) {
-            const wasDragging = isDragging;
             isDragging = false;
-            
-            // Si on relâche le clic droit, on arrête juste le drag
             if (e.button === 2) return;
 
-            // Action du clic gauche ou du tap (s'il n'y a pas eu de mouvement)
             if (!isMoved && isReady && (e.button === 0 || e.changedTouches)) {
                 const clientX = e.clientX || (e.changedTouches ? e.changedTouches[0].clientX : lastMouseX);
                 const clientY = e.clientY || (e.changedTouches ? e.changedTouches[0].clientY : lastMouseY);
@@ -319,27 +400,19 @@ const FRONTEND_HTML = `
                 const by = Math.floor((clientY - offsetY) / scale);
                 
                 if (bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
-                    if (currentTool === 'brush') {
-                        placePixel(bx, by);
-                    } else if (currentTool === 'pipette') {
-                        pickColor(bx, by);
-                    }
+                    if (currentTool === 'brush') placePixel(bx, by);
+                    else if (currentTool === 'pipette') pickColor(bx, by);
                 }
             }
         }
 
-        // Action : Pipette
         function pickColor(x, y) {
-            const idx = (y * SIZE + x) * 4;
-            const r = imgData.data[idx];
-            const g = imgData.data[idx+1];
-            const b = imgData.data[idx+2];
-            // Format hexadécimal
-            const hex = "#" + (1 << 24 | r << 16 | g << 8 | b).toString(16).padStart(6, '0').slice(-6);
-            updateColor(hex);
+            // Lecture exacte du pixel sur le canvas offscreen (garantit 100% de fiabilité)
+            const p = offCtx.getImageData(x, y, 1, 1).data;
+            const hex = "#" + (1 << 24 | p[0] << 16 | p[1] << 8 | p[2]).toString(16).padStart(6, '0').slice(-6);
             
-            // Repasse automatiquement sur le pinceau pour un confort d'utilisation
-            btnBrush.click();
+            updateColor(hex);
+            btnBrush.click(); // Retour au pinceau
         }
 
         canvas.addEventListener('mousedown', onPointerDown);
@@ -350,32 +423,11 @@ const FRONTEND_HTML = `
         window.addEventListener('touchmove', onPointerMove, {passive: false});
         window.addEventListener('touchend', onPointerUp);
 
-        canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            const zoomSpeed = 0.002;
-            const zoomFactor = Math.exp(e.deltaY * -zoomSpeed);
-            
-            const mouseX = e.clientX;
-            const mouseY = e.clientY;
-            
-            // Calculer le nouveau scale en le plafonnant
-            const newScale = Math.max(0.1, Math.min(scale * zoomFactor, 40)); 
-            
-            // Le VRAI facteur de zoom appliqué (évite que la caméra "glisse" quand on est à la limite du zoom)
-            const actualZoomFactor = newScale / scale;
-            
-            offsetX = mouseX - (mouseX - offsetX) * actualZoomFactor;
-            offsetY = mouseY - (mouseY - offsetY) * actualZoomFactor;
-            scale = newScale;
-            
-            draw();
-        }, {passive: false});
-
+        // --- MOTEUR DE RENDU ---
         function draw() {
             ctx.fillStyle = '#1a1a1a';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Utilisation de la transformation GPU native (plus performant et évite les bugs de limites de taille)
             ctx.save();
             ctx.translate(offsetX, offsetY);
             ctx.scale(scale, scale);
@@ -383,7 +435,6 @@ const FRONTEND_HTML = `
             ctx.imageSmoothingEnabled = false; 
             ctx.drawImage(offCanvas, 0, 0);
 
-            // Dessiner les pixels en attente (20% plus petits = 0.8 de largeur/hauteur, centrés avec +0.1)
             for (const p of pendingQueue) {
                 ctx.fillStyle = p.color;
                 ctx.fillRect(p.x + 0.1, p.y + 0.1, 0.8, 0.8);
@@ -392,6 +443,7 @@ const FRONTEND_HTML = `
             ctx.restore();
         }
 
+        // --- WEBSOCKET ET API ---
         let ws;
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -402,18 +454,15 @@ const FRONTEND_HTML = `
                 
                 if (data.type === 'pixel') {
                     const { r, g, b } = hexToRgb(data.color);
-                    const idx = (data.y * SIZE + data.x) * 4;
-                    imgData.data[idx] = r;
-                    imgData.data[idx+1] = g;
-                    imgData.data[idx+2] = b;
-                    imgData.data[idx+3] = 255;
                     
-                    // Si on reçoit la validation, on retire le pixel de la file d'attente
+                    // CORRECTION MAJEURE : Force l'écriture directe dans la mémoire GPU
+                    const id = offCtx.createImageData(1, 1);
+                    id.data[0] = r; id.data[1] = g; id.data[2] = b; id.data[3] = 255;
+                    offCtx.putImageData(id, data.x, data.y);
+                    
                     pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.color.toLowerCase() === data.color.toLowerCase()));
-                    
                     draw();
                 } else if (data.type === 'error') {
-                    // Si le serveur rejette (spam, etc), on supprime le pixel bloquant pour avancer dans la file
                     pendingQueue.shift();
                     draw();
                 } else if (data.type === 'stats') {
@@ -428,49 +477,26 @@ const FRONTEND_HTML = `
             };
         }
 
-        function hexToRgb(hex) {
-            return {
-                r: parseInt(hex.slice(1, 3), 16),
-                g: parseInt(hex.slice(3, 5), 16),
-                b: parseInt(hex.slice(5, 7), 16)
-            };
-        }
-
         function placePixel(bx, by) {
-            // Limite la file d'attente (évite de faire crasher le navigateur si on peint des milliers de pixels sans internet)
             if (pendingQueue.length > 500) return;
-
-            const color = colorPicker.value;
             const existing = pendingQueue.find(p => p.x === bx && p.y === by);
             
-            // Si le pixel est déjà dans la file locale, on met juste sa couleur à jour
-            if (existing) {
-                existing.color = color;
-            } else {
-                pendingQueue.push({ x: bx, y: by, color: color });
-            }
+            if (existing) existing.color = currentColor;
+            else pendingQueue.push({ x: bx, y: by, color: currentColor });
+            
             draw();
         }
 
-        // Boucle d'envoi automatique au serveur (1 pixel toutes les 110ms)
         setInterval(() => {
             const now = Date.now();
-            // On utilise 110ms pour être parfaitement sûr de passer le contrôle de 100ms du serveur
             if (pendingQueue.length > 0 && now - lastSendTime >= 110) {
                 if (ws && ws.readyState === WebSocket.OPEN) {
-                    const p = pendingQueue[0]; // Récupère le pixel le plus ancien
-                    
-                    ws.send(JSON.stringify({
-                        type: 'pixel',
-                        x: p.x,
-                        y: p.y,
-                        color: p.color
-                    }));
-                    
+                    const p = pendingQueue[0]; 
+                    ws.send(JSON.stringify({ type: 'pixel', x: p.x, y: p.y, color: p.color }));
                     lastSendTime = now;
                 }
             }
-        }, 10); // Vérification de la file très récurrente (passée à 10ms pour plus de réactivité)
+        }, 10);
 
         exportBtn.addEventListener('click', () => {
             const link = document.createElement('a');
@@ -479,10 +505,13 @@ const FRONTEND_HTML = `
             link.click();
         });
 
+        // --- DÉMARRAGE ---
         fetch('/board.dat')
             .then(res => res.arrayBuffer())
             .then(buffer => {
                 const view = new Uint8Array(buffer);
+                const imgData = offCtx.createImageData(SIZE, SIZE);
+                
                 for (let i = 0, j = 0; i < view.length; i += 3, j += 4) {
                     imgData.data[j]     = view[i];     
                     imgData.data[j + 1] = view[i + 1]; 
@@ -490,7 +519,6 @@ const FRONTEND_HTML = `
                     imgData.data[j + 3] = 255;         
                 }
                 
-                // --- CORRECTION : Applique tout le plateau sur la toile ---
                 offCtx.putImageData(imgData, 0, 0);
                 
                 isReady = true;
