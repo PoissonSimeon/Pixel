@@ -227,25 +227,31 @@ const FRONTEND_HTML = `
         #color-btn-indicator { width: 38px; height: 38px; border-radius: 8px; border: 2px solid rgba(255,255,255,0.5); cursor: pointer; box-shadow: 0 0 10px rgba(0,0,0,0.3); transition: transform 0.1s; flex-shrink: 0; }
         #color-btn-indicator:hover { transform: scale(1.05); border-color: white; }
 
-        #colorPanel { display: none; position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); background: rgba(20, 20, 20, 0.95); padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(15px); flex-direction: column; align-items: center; gap: 15px; box-shadow: 0 15px 40px rgba(0,0,0,0.8); z-index: 10; }
+        .icon-btn { font-size: 18px; cursor: pointer; transition: transform 0.1s; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; color: white;}
+        .icon-btn:hover { transform: scale(1.2); }
+        #zoomSlider { cursor: pointer; width: 100px; accent-color: #4caf50; margin: 0 5px; }
+
+        /* Panneaux Flottants Multiples (Couleur, Pinceau, Emojis) */
+        .floating-panel {
+            display: none; position: absolute; bottom: 80px; background: rgba(20, 20, 20, 0.95); 
+            padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); 
+            backdrop-filter: blur(15px); box-shadow: 0 15px 40px rgba(0,0,0,0.8); z-index: 50;
+        }
+
+        #colorPanel { left: 50%; transform: translateX(-50%); flex-direction: column; align-items: center; gap: 15px; }
         #hexInput { width: 90px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 16px; font-weight: bold; text-transform: uppercase; outline: none; border-radius: 8px; padding: 8px; text-align: center; }
 
-        /* Editeur Custom Brush */
-        #brushEditorContainer { display: none; background: #222; padding: 6px; border-radius: 8px; border: 1px solid #444; flex-shrink: 0; }
-        #brushEditorWrapper { width: 45px; height: 45px; position: relative; }
-        #brushEditor { 
-            position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
-            display: grid; grid-template-columns: repeat(10, 1fr); 
-            width: 45px; height: 45px; background: #ccc; gap: 1px; border: 1px solid #555; 
-            cursor: crosshair; touch-action: none; transition: width 0.2s ease, height 0.2s ease;
-        }
-        #brushEditorContainer:hover #brushEditor,
-        #brushEditor.expanded {
-            width: 180px; height: 180px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
-            border: 2px solid #888; border-radius: 4px; z-index: 50;
-        }
+        /* Editeur Custom Brush repensé (Panneau flottant pour éviter le bug d'affichage derrière la toile) */
+        #brushPanel { left: 50%; transform: translateX(-50%); flex-direction: column; align-items: center; gap: 10px; }
+        #brushEditor { display: grid; grid-template-columns: repeat(10, 1fr); width: 180px; height: 180px; background: #ccc; gap: 1px; border: 2px solid #555; cursor: crosshair; touch-action: none; border-radius: 4px; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); }
         .brush-cell { background: white; width: 100%; height: 100%; user-select: none; }
         .brush-cell.active { background: black; }
+        .panel-title { color: white; font-size: 13px; font-weight: bold; }
+
+        /* Panneau Emojis */
+        #emojiPanel { right: 20px; display: none; grid-template-columns: repeat(5, 1fr); gap: 12px; padding: 15px; }
+        .emoji-btn { font-size: 26px; cursor: pointer; transition: transform 0.1s; user-select: none; text-align: center; }
+        .emoji-btn:hover { transform: scale(1.3); }
 
         /* Infos Top optimisées */
         #top-info { position: absolute; top: 15px; right: 15px; background: rgba(20, 20, 20, 0.85); padding: 8px 15px; border-radius: 20px; color: #fff; font-size: 13px; font-weight: bold; display: flex; gap: 15px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); pointer-events: none; z-index: 10; }
@@ -272,6 +278,7 @@ const FRONTEND_HTML = `
             #top-info { top: 10px; right: 10px; left: 10px; padding: 6px 12px; font-size: 11px; justify-content: space-between; }
             #status { border: none; padding-left: 0; }
             .hide-mobile { display: none !important; }
+            #emojiPanel { left: 50%; transform: translateX(-50%); right: auto; width: max-content; }
         }
     </style>
 </head>
@@ -297,23 +304,37 @@ const FRONTEND_HTML = `
         <div id="canvas-wrapper">
             <canvas id="viewCanvas"></canvas>
             
-            <div id="colorPanel">
+            <!-- Panneaux Flottants -->
+            <div id="colorPanel" class="floating-panel">
                 <div id="colorPickerWheel"></div>
                 <input type="text" id="hexInput" value="#ff0000" maxlength="7">
+            </div>
+
+            <div id="brushPanel" class="floating-panel">
+                <span class="panel-title">Créer un Pinceau 10x10</span>
+                <div id="brushEditor"></div>
+            </div>
+
+            <div id="emojiPanel" class="floating-panel">
+                <div class="emoji-btn">👽</div><div class="emoji-btn">👻</div><div class="emoji-btn">🤖</div><div class="emoji-btn">💩</div><div class="emoji-btn">🤡</div>
+                <div class="emoji-btn">👾</div><div class="emoji-btn">🐱</div><div class="emoji-btn">🐶</div><div class="emoji-btn">🦊</div><div class="emoji-btn">🐵</div>
+                <div class="emoji-btn">🐸</div><div class="emoji-btn">🐷</div><div class="emoji-btn">🐼</div><div class="emoji-btn">🐻</div><div class="emoji-btn">🦁</div>
+                <div class="emoji-btn">🐮</div><div class="emoji-btn">🦄</div><div class="emoji-btn">🐔</div><div class="emoji-btn">🐉</div><div class="emoji-btn">🦖</div>
             </div>
         </div>
 
         <!-- HUD principal horizontal -->
         <div id="hud">
+            <div class="hud-group hide-mobile">
+                <span class="icon-btn" id="zoomOutBtn" title="Dézoom max">➖</span>
+                <input type="range" id="zoomSlider" min="0.1" max="30" step="0.1" value="1">
+                <span class="icon-btn" id="zoomInBtn" title="Zoom max">➕</span>
+            </div>
+
             <div class="hud-group">
                 <button id="btnBrushNormal" class="tool-btn active">1x1</button>
                 <button id="btnBrushCustom" class="tool-btn">Custom</button>
-                
-                <div id="brushEditorContainer">
-                    <div id="brushEditorWrapper">
-                        <div id="brushEditor"></div>
-                    </div>
-                </div>
+                <button id="btnEditBrush" class="tool-btn" style="display: none;">⚙️ Forme</button>
 
                 <button id="btnEraser" class="tool-btn">Gomme</button>
                 <div id="color-btn-indicator" style="background-color: #ff0000;"></div>
@@ -335,17 +356,25 @@ const FRONTEND_HTML = `
         
         const btnBrushNormal = document.getElementById('btnBrushNormal');
         const btnBrushCustom = document.getElementById('btnBrushCustom');
+        const btnEditBrush = document.getElementById('btnEditBrush');
         const btnEraser = document.getElementById('btnEraser');
-        const brushEditorContainer = document.getElementById('brushEditorContainer');
+        
+        const brushPanel = document.getElementById('brushPanel');
         const brushEditor = document.getElementById('brushEditor');
 
         const btnPipette = document.getElementById('btnPipette');
         const btnCursors = document.getElementById('btnCursors');
         const btnPseudo = document.getElementById('btnPseudo');
+        const emojiPanel = document.getElementById('emojiPanel');
+
         const colorBtnIndicator = document.getElementById('color-btn-indicator');
         const colorPanel = document.getElementById('colorPanel');
         const hexInput = document.getElementById('hexInput');
         
+        const zoomSlider = document.getElementById('zoomSlider');
+        const zoomOutBtn = document.getElementById('zoomOutBtn');
+        const zoomInBtn = document.getElementById('zoomInBtn');
+
         const statusEl = document.getElementById('status');
         const valX = document.getElementById('valX');
         const valY = document.getElementById('valY');
@@ -358,7 +387,7 @@ const FRONTEND_HTML = `
         const progressRemaining = document.getElementById('progress-remaining');
 
         const SIZE = 1000;
-        const DEFAULT_BG_COLOR = '#ffffff'; // La gomme applique désormais du blanc
+        const DEFAULT_BG_COLOR = '#ffffff'; 
         let scale = 1;
         let offsetX = 0;
         let offsetY = 0;
@@ -398,14 +427,26 @@ const FRONTEND_HTML = `
         const otherCursors = new Map(); 
         let lastCursorSendTime = 0;
 
-        // --- GESTION DU PSEUDO ---
+        // --- GESTION DES PANNEAUX ---
+        function closeAllPanels() {
+            colorPanel.style.display = 'none';
+            brushPanel.style.display = 'none';
+            emojiPanel.style.display = 'none';
+        }
+
+        // --- GESTION DU PSEUDO (CLAVIER EMOJI) ---
         btnPseudo.addEventListener('click', () => {
-            const input = prompt("Entrez un emoji pour représenter votre joueur :", myEmoji);
-            if (input && input.trim() !== '') {
-                // Array.from garantit l'extraction correcte d'un emoji complexe (surrogate pairs)
-                myEmoji = Array.from(input.trim())[0];
+            const isVisible = emojiPanel.style.display === 'grid';
+            closeAllPanels();
+            if (!isVisible) emojiPanel.style.display = 'grid';
+        });
+
+        document.querySelectorAll('.emoji-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                myEmoji = e.target.innerText;
                 btnPseudo.innerText = "Pseudo: " + myEmoji;
-            }
+                closeAllPanels();
+            });
         });
 
         // --- GESTION DE L'EDITEUR DE PINCEAU (10x10) ---
@@ -421,15 +462,6 @@ const FRONTEND_HTML = `
 
         let isEditingBrush = false;
         let brushPaintMode = true; 
-
-        brushEditorContainer.addEventListener('mouseenter', () => brushEditor.classList.add('expanded'));
-        brushEditorContainer.addEventListener('mouseleave', () => brushEditor.classList.remove('expanded'));
-
-        document.addEventListener('touchstart', (e) => {
-            if (!brushEditorContainer.contains(e.target) && !btnBrushCustom.contains(e.target)) {
-                brushEditor.classList.remove('expanded');
-            }
-        }, {passive: true});
 
         function setBrushCell(idx, state) {
             if (idx >= 0 && idx < 100) {
@@ -449,7 +481,6 @@ const FRONTEND_HTML = `
         }
 
         brushEditor.addEventListener('mousedown', (e) => {
-            if (!brushEditor.classList.contains('expanded')) brushEditor.classList.add('expanded');
             if(e.target.classList.contains('brush-cell')) {
                 isEditingBrush = true;
                 const idx = parseInt(e.target.dataset.index);
@@ -462,10 +493,6 @@ const FRONTEND_HTML = `
 
         brushEditor.addEventListener('touchstart', (e) => {
             e.preventDefault();
-            if (!brushEditor.classList.contains('expanded')) {
-                brushEditor.classList.add('expanded');
-                return; 
-            }
             const touch = e.touches[0];
             const el = document.elementFromPoint(touch.clientX, touch.clientY);
             if (el && el.classList.contains('brush-cell')) {
@@ -521,11 +548,9 @@ const FRONTEND_HTML = `
         });
 
         colorBtnIndicator.addEventListener('click', () => {
-            colorPanel.style.display = colorPanel.style.display === 'flex' ? 'none' : 'flex';
-        });
-
-        canvas.addEventListener('mousedown', () => {
-            if (colorPanel.style.display === 'flex') colorPanel.style.display = 'none';
+            const isVisible = colorPanel.style.display === 'flex';
+            closeAllPanels();
+            if (!isVisible) colorPanel.style.display = 'flex';
         });
 
         // --- GESTION DES OUTILS ---
@@ -541,25 +566,41 @@ const FRONTEND_HTML = `
         btnBrushNormal.addEventListener('click', () => { 
             currentTool = 'brush'; brushMode = 'normal'; 
             setActiveTool(btnBrushNormal); 
-            brushEditorContainer.style.display = 'none'; 
+            btnEditBrush.style.display = 'none';
+            closeAllPanels();
         });
         
         btnBrushCustom.addEventListener('click', () => { 
             currentTool = 'brush'; brushMode = 'custom'; 
             setActiveTool(btnBrushCustom); 
-            brushEditorContainer.style.display = 'block'; 
+            btnEditBrush.style.display = 'flex';
+            
+            const isVisible = brushPanel.style.display === 'flex';
+            closeAllPanels();
+            if (!isVisible) brushPanel.style.display = 'flex';
+        });
+
+        btnEditBrush.addEventListener('click', () => {
+            const isVisible = brushPanel.style.display === 'flex';
+            closeAllPanels();
+            if (!isVisible) brushPanel.style.display = 'flex';
         });
 
         btnEraser.addEventListener('click', () => { 
             currentTool = 'eraser'; 
             setActiveTool(btnEraser); 
-            brushEditorContainer.style.display = brushMode === 'custom' ? 'block' : 'none'; 
+            if (brushMode === 'custom') {
+                btnEditBrush.style.display = 'flex';
+            } else {
+                btnEditBrush.style.display = 'none';
+            }
+            closeAllPanels();
         });
 
         btnPipette.addEventListener('click', () => { 
             currentTool = 'pipette'; 
             setActiveTool(btnPipette); 
-            brushEditorContainer.style.display = 'none'; 
+            closeAllPanels();
         });
 
         btnCursors.addEventListener('click', () => {
@@ -569,6 +610,10 @@ const FRONTEND_HTML = `
         });
 
         canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+        // Ferme les panneaux si on clique sur la toile
+        canvas.addEventListener('mousedown', closeAllPanels);
+        canvas.addEventListener('touchstart', closeAllPanels, {passive: false});
 
         // --- GESTION DE LA JAUGE ---
         function updateProgressBar() {
@@ -612,8 +657,22 @@ const FRONTEND_HTML = `
             offsetX = targetX - (targetX - offsetX) * actualZoomFactor;
             offsetY = targetY - (targetY - offsetY) * actualZoomFactor;
             scale = newScale;
+            if (zoomSlider) zoomSlider.value = scale;
             draw();
         }
+
+        // Rétablissement des contrôles de zoom PC
+        zoomSlider.addEventListener('input', (e) => applyZoom(parseFloat(e.target.value), true));
+        zoomOutBtn.addEventListener('click', () => applyZoom(0.1, true));
+        zoomInBtn.addEventListener('click', () => applyZoom(30, true));
+
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomSpeed = 0.002;
+            const zoomFactor = Math.exp(e.deltaY * -zoomSpeed);
+            const pos = getEventData(e);
+            applyZoom(scale * zoomFactor, false, pos.canvasX, pos.canvasY);
+        }, {passive: false});
 
         // --- NAVIGATION ET DESSIN ---
         function resize() {
@@ -623,6 +682,7 @@ const FRONTEND_HTML = `
                 scale = Math.min(canvas.width / SIZE, canvas.height / SIZE) * 0.9;
                 offsetX = (canvas.width - (SIZE * scale)) / 2;
                 offsetY = (canvas.height - (SIZE * scale)) / 2;
+                if (zoomSlider) zoomSlider.value = scale;
             }
             draw();
         }
@@ -677,7 +737,7 @@ const FRONTEND_HTML = `
 
         // Tactile
         canvas.addEventListener('touchstart', (e) => {
-            e.preventDefault(); // Empêche le défilement de la page sur mobile
+            // L'événement preventDefault a été retiré ici pour permettre le closeAllPanels
             
             if (e.touches.length === 2) {
                 // 2 Doigts : Pan + Pinch
@@ -831,7 +891,6 @@ const FRONTEND_HTML = `
                     const screenX = c.x * scale + offsetX + scale/2;
                     const screenY = c.y * scale + offsetY + scale/2;
 
-                    // Affiche l'emoji reçu ou l'emoji extraterrestre par défaut
                     ctx.fillText(c.emoji || '👽', screenX, screenY);
                 }
             }
