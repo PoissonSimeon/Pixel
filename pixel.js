@@ -489,6 +489,10 @@ const FRONTEND_HTML = `
                     imgData.data[j + 2] = view[i + 2]; 
                     imgData.data[j + 3] = 255;         
                 }
+                
+                // --- CORRECTION : Applique tout le plateau sur la toile ---
+                offCtx.putImageData(imgData, 0, 0);
+                
                 isReady = true;
                 statusEl.innerText = "Prêt à peindre";
                 statusEl.style.color = "#4caf50";
