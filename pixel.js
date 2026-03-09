@@ -342,6 +342,14 @@ const FRONTEND_HTML = `
             ]
         });
 
+        function hexToRgbClient(hex) {
+            return {
+                r: parseInt(hex.slice(1, 3), 16),
+                g: parseInt(hex.slice(3, 5), 16),
+                b: parseInt(hex.slice(5, 7), 16)
+            };
+        }
+
         function updateColor(hex) {
             currentColor = hex;
             colorBtnIndicator.style.backgroundColor = hex;
@@ -621,6 +629,37 @@ const FRONTEND_HTML = `
             const offset = Math.floor(currentSize / 2);
             const startX = bx - offset;
             const startY = by - offset;
+
+            // --- OPTIMISATION : Ne pas envoyer si la couleur est déjà la bonne ---
+            const targetRgb = hexToRgbClient(currentColor);
+            let allMatch = true;
+            
+            const checkX = Math.max(0, startX);
+            const checkY = Math.max(0, startY);
+            const checkW = Math.min(startX + currentSize, SIZE) - checkX;
+            const checkH = Math.min(startY + currentSize, SIZE) - checkY;
+
+            if (checkW > 0 && checkH > 0) {
+                const imgData = offCtx.getImageData(checkX, checkY, checkW, checkH).data;
+                for (let i = 0; i < imgData.length; i += 4) {
+                    if (imgData[i] !== targetRgb.r || imgData[i+1] !== targetRgb.g || imgData[i+2] !== targetRgb.b) {
+                        allMatch = false;
+                        break;
+                    }
+                }
+            }
+
+            if (allMatch) {
+                // Si la toile a déjà cette couleur, on nettoie d'éventuels ordres en attente contradictoires
+                const lenBefore = pendingQueue.length;
+                pendingQueue = pendingQueue.filter(p => !(p.x === startX && p.y === startY && p.size === currentSize));
+                if (pendingQueue.length !== lenBefore) {
+                    draw();
+                    updateProgressBar();
+                }
+                return;
+            }
+            // ----------------------------------------------------------------------
 
             const existing = pendingQueue.find(p => p.x === startX && p.y === startY && p.size === currentSize);
             
