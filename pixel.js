@@ -762,48 +762,41 @@ const FRONTEND_HTML = `
             if (pendingQueue.length === 0) totalPendingBatch = 0;
 
             const targetRgb = hexToRgbClient(currentColor);
-            let allMatch = true;
-            let activeOffsets = [];
+            let filteredOffsets = null; // null pour pinceau normal, tableau pour custom
 
-            // Récupère la forme du pinceau actif
-            if (brushMode === 'custom') {
-                for (let i = 0; i < 100; i++) {
-                    if (customBrush[i]) activeOffsets.push(i);
-                }
-                if (activeOffsets.length === 0) return; // Ignore si le custom brush est vide
-            }
-
-            // OPTIMISATION : Ne pas envoyer si la toile a déjà la couleur exacte sous chaque pixel de la forme
             if (brushMode === 'normal') {
                 if (bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
                     const p = offCtx.getImageData(bx, by, 1, 1).data;
-                    if (p[0] !== targetRgb.r || p[1] !== targetRgb.g || p[2] !== targetRgb.b) allMatch = false;
+                    if (p[0] === targetRgb.r && p[1] === targetRgb.g && p[2] === targetRgb.b) {
+                        return; // Déjà de la bonne couleur exacte
+                    }
+                } else {
+                    return; // Hors limites
                 }
             } else {
-                for (const idx of activeOffsets) {
-                    const dx = (idx % 10) - 5;
-                    const dy = Math.floor(idx / 10) - 5;
-                    const px = bx + dx;
-                    const py = by + dy;
-                    if (px >= 0 && px < SIZE && py >= 0 && py < SIZE) {
-                        const p = offCtx.getImageData(px, py, 1, 1).data;
-                        if (p[0] !== targetRgb.r || p[1] !== targetRgb.g || p[2] !== targetRgb.b) {
-                            allMatch = false; break;
+                filteredOffsets = [];
+                // Analyse chaque sous-pixel du pinceau personnalisé
+                for (let i = 0; i < 100; i++) {
+                    if (customBrush[i]) {
+                        const dx = (i % 10) - 5;
+                        const dy = Math.floor(i / 10) - 5;
+                        const px = bx + dx;
+                        const py = by + dy;
+                        
+                        if (px >= 0 && px < SIZE && py >= 0 && py < SIZE) {
+                            const p = offCtx.getImageData(px, py, 1, 1).data;
+                            // Si la couleur est différente, on l'ajoute à la liste des pixels à envoyer
+                            if (p[0] !== targetRgb.r || p[1] !== targetRgb.g || p[2] !== targetRgb.b) {
+                                filteredOffsets.push(i);
+                            }
                         }
                     }
                 }
+                // Si la liste est vide, c'est que la forme chevauche intégralement la bonne couleur
+                if (filteredOffsets.length === 0) return; 
             }
 
-            const shapeStr = brushMode === 'custom' ? JSON.stringify(activeOffsets) : null;
-
-            if (allMatch) {
-                const lenBefore = pendingQueue.length;
-                pendingQueue = pendingQueue.filter(p => !(p.x === bx && p.y === by && p.shapeStr === shapeStr));
-                if (pendingQueue.length !== lenBefore) {
-                    draw(); updateProgressBar();
-                }
-                return;
-            }
+            const shapeStr = brushMode === 'custom' ? JSON.stringify(filteredOffsets) : null;
 
             const existing = pendingQueue.find(p => p.x === bx && p.y === by && p.shapeStr === shapeStr);
             if (existing) {
@@ -813,7 +806,7 @@ const FRONTEND_HTML = `
                 pendingQueue.push({ 
                     x: bx, y: by, color: currentColor, 
                     shapeStr: shapeStr, 
-                    shape: brushMode === 'custom' ? activeOffsets : null,
+                    shape: filteredOffsets,
                     retries: 0 
                 });
                 totalPendingBatch++;
