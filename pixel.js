@@ -161,6 +161,13 @@ const FRONTEND_HTML = `
         input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
         input[type="color"]::-webkit-color-swatch { border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 10px rgba(0,0,0,0.3); }
         
+        #hexInput { width: 75px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 14px; font-weight: bold; text-transform: uppercase; outline: none; border-radius: 5px; padding: 5px; text-align: center; }
+        
+        .tools { display: flex; gap: 10px; border-right: 1px solid rgba(255,255,255,0.2); padding-right: 20px; }
+        .tool-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 50%; width: 45px; height: 45px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; transition: all 0.2s; outline: none; padding: 0; }
+        .tool-btn:hover { background: rgba(255,255,255,0.2); }
+        .tool-btn.active { background: rgba(76, 175, 80, 0.5); border-color: #4caf50; box-shadow: 0 0 10px rgba(76, 175, 80, 0.5); }
+
         #exportBtn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 50%; width: 45px; height: 45px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; transition: background 0.2s; outline: none; padding: 0; }
         #exportBtn:hover { background: rgba(255,255,255,0.2); }
 
@@ -183,7 +190,14 @@ const FRONTEND_HTML = `
     </div>
 
     <div id="ui">
-        <input type="color" id="colorPicker" value="#ff0000">
+        <div class="tools">
+            <button id="btnBrush" class="tool-btn active" title="Pinceau">🖌️</button>
+            <button id="btnPipette" class="tool-btn" title="Pipette">💧</button>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 5px;">
+            <input type="color" id="colorPicker" value="#ff0000">
+            <input type="text" id="hexInput" value="#ff0000" maxlength="7">
+        </div>
         <button id="exportBtn" title="Exporter la toile en PNG">💾</button>
         <div class="info-block">
             <span class="info-label">État</span>
@@ -196,6 +210,9 @@ const FRONTEND_HTML = `
         const canvas = document.getElementById('viewCanvas');
         const ctx = canvas.getContext('2d', { alpha: false });
         const colorPicker = document.getElementById('colorPicker');
+        const hexInput = document.getElementById('hexInput');
+        const btnBrush = document.getElementById('btnBrush');
+        const btnPipette = document.getElementById('btnPipette');
         const statusEl = document.getElementById('status');
         const valX = document.getElementById('valX');
         const valY = document.getElementById('valY');
@@ -220,6 +237,26 @@ const FRONTEND_HTML = `
         let lastMouseX = 0;
         let lastMouseY = 0;
         let isMoved = false;
+        let currentTool = 'brush'; // 'brush' or 'pipette'
+
+        // Synchro de la couleur
+        function updateColor(hex) {
+            colorPicker.value = hex;
+            hexInput.value = hex;
+        }
+        colorPicker.addEventListener('input', (e) => updateColor(e.target.value));
+        hexInput.addEventListener('input', (e) => {
+            let val = e.target.value;
+            if (!val.startsWith('#')) val = '#' + val;
+            if (/^#[0-9a-fA-F]{6}$/.test(val)) updateColor(val);
+        });
+
+        // Gestion des outils
+        btnBrush.addEventListener('click', () => { currentTool = 'brush'; btnBrush.classList.add('active'); btnPipette.classList.remove('active'); canvas.style.cursor = 'crosshair'; });
+        btnPipette.addEventListener('click', () => { currentTool = 'pipette'; btnPipette.classList.add('active'); btnBrush.classList.remove('active'); canvas.style.cursor = 'crosshair'; });
+
+        // Empêcher le menu contextuel du clic droit (indispensable pour le drag droit)
+        canvas.addEventListener('contextmenu', e => e.preventDefault());
 
         function resize() {
             canvas.width = window.innerWidth;
@@ -234,10 +271,13 @@ const FRONTEND_HTML = `
         window.addEventListener('resize', resize);
         
         function onPointerDown(e) {
-            isDragging = true;
+            // Clic droit (2) ou tactile (touches) pour agripper et bouger
+            if (e.button === 2 || e.touches) {
+                isDragging = true;
+            }
             isMoved = false;
-            lastMouseX = e.clientX || e.touches[0].clientX;
-            lastMouseY = e.clientY || e.touches[0].clientY;
+            lastMouseX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
+            lastMouseY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
         }
         function onPointerMove(e) {
             const clientX = e.clientX || (e.touches ? e.touches[0].clientX : lastMouseX);
@@ -260,10 +300,42 @@ const FRONTEND_HTML = `
             draw();
         }
         function onPointerUp(e) {
+            const wasDragging = isDragging;
             isDragging = false;
-            if (!isMoved && isReady) {
-                placePixel(lastMouseX, lastMouseY);
+            
+            // Si on relâche le clic droit, on arrête juste le drag
+            if (e.button === 2) return;
+
+            // Action du clic gauche ou du tap (s'il n'y a pas eu de mouvement)
+            if (!isMoved && isReady && (e.button === 0 || e.changedTouches)) {
+                const clientX = e.clientX || (e.changedTouches ? e.changedTouches[0].clientX : lastMouseX);
+                const clientY = e.clientY || (e.changedTouches ? e.changedTouches[0].clientY : lastMouseY);
+                
+                const bx = Math.floor((clientX - offsetX) / scale);
+                const by = Math.floor((clientY - offsetY) / scale);
+                
+                if (bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
+                    if (currentTool === 'brush') {
+                        placePixel(bx, by);
+                    } else if (currentTool === 'pipette') {
+                        pickColor(bx, by);
+                    }
+                }
             }
+        }
+
+        // Action : Pipette
+        function pickColor(x, y) {
+            const idx = (y * SIZE + x) * 4;
+            const r = imgData.data[idx];
+            const g = imgData.data[idx+1];
+            const b = imgData.data[idx+2];
+            // Format hexadécimal
+            const hex = "#" + (1 << 24 | r << 16 | g << 8 | b).toString(16).padStart(6, '0').slice(-6);
+            updateColor(hex);
+            
+            // Repasse automatiquement sur le pinceau pour un confort d'utilisation
+            btnBrush.click();
         }
 
         canvas.addEventListener('mousedown', onPointerDown);
@@ -334,14 +406,11 @@ const FRONTEND_HTML = `
             };
         }
 
-        function placePixel(screenX, screenY) {
+        function placePixel(bx, by) {
             const now = Date.now();
             if (now - lastClickTime < 500) return;
 
-            const bx = Math.floor((screenX - offsetX) / scale);
-            const by = Math.floor((screenY - offsetY) / scale);
-
-            if (bx >= 0 && bx < SIZE && by >= 0 && by < SIZE && ws.readyState === WebSocket.OPEN) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
                 lastClickTime = now;
                 ws.send(JSON.stringify({
                     type: 'pixel',
