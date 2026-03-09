@@ -975,19 +975,51 @@ const FRONTEND_HTML = `
 
             const colorToUse = currentTool === 'eraser' ? DEFAULT_BG_COLOR : currentColor;
             const targetRgb = hexToRgbClient(colorToUse);
+            
+            // 1. Création d'une "carte virtuelle" des pixels déjà en attente d'envoi
+            const pendingState = new Map();
+            for (const item of pendingQueue) {
+                if (item.shape) {
+                    for (const idx of item.shape) {
+                        const dx = (idx % 10) - 5;
+                        const dy = Math.floor(idx / 10) - 5;
+                        pendingState.set(`${item.x + dx},${item.y + dy}`, item.color);
+                    }
+                } else {
+                    pendingState.set(`${item.x},${item.y}`, item.color);
+                }
+            }
+
             let filteredOffsets = null; 
 
             if (brushMode === 'normal') {
                 if (bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
-                    const p = offCtx.getImageData(bx, by, 1, 1).data;
-                    if (p[0] === targetRgb.r && p[1] === targetRgb.g && p[2] === targetRgb.b) {
-                        return; 
+                    const key = `${bx},${by}`;
+                    // Vérifie d'abord si c'est dans la file d'attente
+                    if (pendingState.has(key)) {
+                        if (pendingState.get(key) === colorToUse) return; 
+                    } else {
+                        // Sinon vérifie la toile validée
+                        const p = offCtx.getImageData(bx, by, 1, 1).data;
+                        if (p[0] === targetRgb.r && p[1] === targetRgb.g && p[2] === targetRgb.b) return; 
                     }
                 } else {
                     return; 
                 }
             } else {
                 filteredOffsets = [];
+                
+                // Optimisation de lecture : On récupère tout le bloc 10x10 de la toile en 1 seule fois
+                const cropX = Math.max(0, bx - 5);
+                const cropY = Math.max(0, by - 5);
+                const cropW = Math.min(SIZE, bx + 5) - cropX;
+                const cropH = Math.min(SIZE, by + 5) - cropY;
+                
+                let imgData = null;
+                if (cropW > 0 && cropH > 0) {
+                    imgData = offCtx.getImageData(cropX, cropY, cropW, cropH).data;
+                }
+
                 for (let i = 0; i < 100; i++) {
                     if (customBrush[i]) {
                         const dx = (i % 10) - 5;
@@ -996,34 +1028,40 @@ const FRONTEND_HTML = `
                         const py = by + dy;
                         
                         if (px >= 0 && px < SIZE && py >= 0 && py < SIZE) {
-                            const p = offCtx.getImageData(px, py, 1, 1).data;
-                            if (p[0] !== targetRgb.r || p[1] !== targetRgb.g || p[2] !== targetRgb.b) {
-                                filteredOffsets.push(i);
+                            const key = `${px},${py}`;
+                            
+                            // 1. Est-ce que le pixel va déjà être repeint de la bonne couleur par la file d'attente ?
+                            if (pendingState.has(key)) {
+                                if (pendingState.get(key) !== colorToUse) {
+                                    filteredOffsets.push(i); // Couleur différente, on doit l'écraser
+                                }
+                            } 
+                            // 2. Sinon, est-il déjà de la bonne couleur sur la toile officielle ?
+                            else if (imgData) {
+                                const localX = px - cropX;
+                                const localY = py - cropY;
+                                const dataIdx = (localY * cropW + localX) * 4;
+                                
+                                if (imgData[dataIdx] !== targetRgb.r || imgData[dataIdx+1] !== targetRgb.g || imgData[dataIdx+2] !== targetRgb.b) {
+                                    filteredOffsets.push(i);
+                                }
                             }
                         }
                     }
                 }
+                // Si tous les sous-pixels du pinceau chevauchent une couleur identique (en attente ou validée), on annule !
                 if (filteredOffsets.length === 0) return; 
             }
 
             const shapeStr = brushMode === 'custom' ? JSON.stringify(filteredOffsets) : null;
 
-            const existing = pendingQueue.find(p => p.x === bx && p.y === by && p.shapeStr === shapeStr);
-            if (existing) {
-                // CORRECTION ANTI-SPAM : Si on repasse sur un pixel qui est DÉJÀ en attente avec la MÊME couleur, on l'ignore silencieusement.
-                if (existing.color === colorToUse) return;
-                
-                existing.color = colorToUse;
-                existing.retries = 0;
-            } else {
-                pendingQueue.push({ 
-                    x: bx, y: by, color: colorToUse, 
-                    shapeStr: shapeStr, 
-                    shape: filteredOffsets,
-                    retries: 0 
-                });
-                totalPendingBatch++;
-            }
+            pendingQueue.push({ 
+                x: bx, y: by, color: colorToUse, 
+                shapeStr: shapeStr, 
+                shape: filteredOffsets,
+                retries: 0 
+            });
+            totalPendingBatch++;
             
             draw();
             updateProgressBar();
