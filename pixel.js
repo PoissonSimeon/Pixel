@@ -420,6 +420,7 @@ const FRONTEND_HTML = `
         let isMoved = false;
         let lastMouseX = 0;
         let lastMouseY = 0;
+        let lastInputWasTouch = false; // Variable cruciale pour différencier mobile/souris
         
         // Tactile
         let isPinching = false;
@@ -461,6 +462,7 @@ const FRONTEND_HTML = `
             myEmoji = event.detail.unicode; 
             btnPseudo.innerText = "Pseudo: " + myEmoji;
             closeAllPanels();
+            emitCursorPosition();
         });
 
         // --- GESTION DE L'EDITEUR DE PINCEAU (10x10) ---
@@ -673,6 +675,7 @@ const FRONTEND_HTML = `
             scale = newScale;
             if (zoomSlider) zoomSlider.value = scale;
             draw();
+            emitCursorPosition();
         }
 
         // Rétablissement des contrôles de zoom PC
@@ -727,16 +730,30 @@ const FRONTEND_HTML = `
             }
         }
 
+        // Envoi du curseur virtuel de manière intelligente selon le type de périphérique
         function emitCursorPosition() {
             const now = Date.now();
-            if (now - lastCursorSendTime > 100 && ws && ws.readyState === WebSocket.OPEN && hoverX >= 0) {
-                ws.send(JSON.stringify({ type: 'cursor', x: hoverX, y: hoverY, emoji: myEmoji }));
-                lastCursorSendTime = now;
+            if (now - lastCursorSendTime > 100 && ws && ws.readyState === WebSocket.OPEN) {
+                let emitX = hoverX;
+                let emitY = hoverY;
+
+                // Si l'utilisateur est sur smartphone, son curseur est la croix virtuelle centrale
+                if (lastInputWasTouch) {
+                    const rect = canvas.getBoundingClientRect();
+                    emitX = Math.floor((rect.width / 2 - offsetX) / scale);
+                    emitY = Math.floor((rect.height / 2 - offsetY) / scale);
+                }
+
+                if (emitX >= 0 && emitY >= 0 && emitX < SIZE && emitY < SIZE) {
+                    ws.send(JSON.stringify({ type: 'cursor', x: emitX, y: emitY, emoji: myEmoji }));
+                    lastCursorSendTime = now;
+                }
             }
         }
 
         // Souris
         canvas.addEventListener('mousedown', (e) => {
+            lastInputWasTouch = false;
             const pos = getEventData(e);
             lastMouseX = pos.screenX; lastMouseY = pos.screenY;
             isMoved = false;
@@ -749,8 +766,9 @@ const FRONTEND_HTML = `
             }
         });
 
-        // Tactile : Gérer le saut/téléportation
+        // Tactile : Gérer le saut/téléportation et les clics accidentels
         canvas.addEventListener('touchstart', (e) => {
+            lastInputWasTouch = true;
             if (e.target === canvas) e.preventDefault();
             
             if (e.touches.length === 2) {
@@ -758,7 +776,6 @@ const FRONTEND_HTML = `
                 isPanning = true;
                 isPainting = false;
                 lastPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-                // On met à jour l'ancrage au moment exact où les 2 doigts sont posés pour éviter le saut
                 lastMouseX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
                 lastMouseY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
             } else if (e.touches.length === 1 && e.target === canvas) {
@@ -769,8 +786,7 @@ const FRONTEND_HTML = `
                 const pos = getEventData(e);
                 lastMouseX = pos.screenX; 
                 lastMouseY = pos.screenY;
-                triggerTool(pos.canvasX, pos.canvasY);
-                emitCursorPosition();
+                // On NE PEINT PLUS immédiatement pour éviter le pixel accidentel si le second doigt arrive juste après
             }
         }, {passive: false});
 
@@ -784,7 +800,7 @@ const FRONTEND_HTML = `
                 const centerClientY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
                 const rect = canvas.getBoundingClientRect();
                 
-                // CORRECTION DU TP : On effectue le déplacement (Pan) en premier
+                // On effectue le déplacement (Pan) en premier
                 offsetX += centerClientX - lastMouseX;
                 offsetY += centerClientY - lastMouseY;
                 
@@ -806,7 +822,6 @@ const FRONTEND_HTML = `
                     valY.innerText = by;
                     hoverX = bx;
                     hoverY = by;
-                    emitCursorPosition();
                 } else {
                     hoverX = -1; hoverY = -1;
                 }
@@ -817,7 +832,9 @@ const FRONTEND_HTML = `
                 offsetX += pos.screenX - lastMouseX;
                 offsetY += pos.screenY - lastMouseY;
                 draw();
+                emitCursorPosition();
             } else if (isPainting && (currentTool === 'brush' || currentTool === 'eraser')) {
+                isMoved = true; // Empêche le déclenchement d'un pixel en mode "tap rapide"
                 triggerTool(pos.canvasX, pos.canvasY);
             }
             
@@ -831,7 +848,13 @@ const FRONTEND_HTML = `
         canvas.addEventListener('mouseleave', () => { hoverX = -1; hoverY = -1; draw(); });
 
         window.addEventListener('touchend', (e) => {
-            // CORRECTION DU TP : Quand on retire un doigt après un zoom, on stop tout pour ne pas générer de coup de pinceau accidentel
+            // Gestion du Tap tactile simple (Peindre un seul pixel)
+            if (isPainting && !isMoved && e.target === canvas && e.changedTouches) {
+                const pos = getEventData(e);
+                triggerTool(pos.canvasX, pos.canvasY);
+                emitCursorPosition();
+            }
+
             if (e.touches && e.touches.length < 2) {
                 isPinching = false;
                 if (e.touches.length === 1) {
@@ -898,22 +921,15 @@ const FRONTEND_HTML = `
             
             ctx.restore();
 
-            // Affichage des Emojis (Curseurs)
+            // Affichage des Emojis (Curseurs) Persistants
             if (showCursors) {
-                const now = Date.now();
                 ctx.font = Math.max(20, scale * 2) + "px Arial";
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
 
                 for (const [id, c] of otherCursors.entries()) {
-                    if (now - c.time > 10000) { 
-                        otherCursors.delete(id); 
-                        continue;
-                    }
-                    
                     const screenX = c.x * scale + offsetX + scale/2;
                     const screenY = c.y * scale + offsetY + scale/2;
-
                     ctx.fillText(c.emoji || '👽', screenX, screenY);
                 }
             }
@@ -932,7 +948,7 @@ const FRONTEND_HTML = `
                     otherCursors.set(data.id, { x: data.x, y: data.y, emoji: data.emoji, time: Date.now() });
                     if (showCursors) draw();
                 } else if (data.type === 'cursor_remove') {
-                    otherCursors.delete(data.id);
+                    otherCursors.delete(data.id); // Le joueur est retiré de la carte SEULEMENT s'il se déconnecte !
                     if (showCursors) draw();
                 } else if (data.type === 'pixel') {
                     offCtx.fillStyle = data.color;
@@ -951,7 +967,7 @@ const FRONTEND_HTML = `
                     const lenBefore = pendingQueue.length;
                     pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.shapeStr === shapeStr));
                     
-                    // CORRECTION MULTIJOUEUR : Forcer le dessin permet de voir immédiatement les pixels des autres joueurs !
+                    // Forcer le dessin permet de voir immédiatement les pixels des autres joueurs !
                     draw();
                     
                     if (pendingQueue.length !== lenBefore) {
@@ -984,11 +1000,9 @@ const FRONTEND_HTML = `
                     for (const idx of item.shape) {
                         const dx = (idx % 10) - 5;
                         const dy = Math.floor(idx / 10) - 5;
-                        // CORRECTION : Concaténation classique au lieu des backticks
                         pendingState.set((item.x + dx) + ',' + (item.y + dy), item.color);
                     }
                 } else {
-                    // CORRECTION : Concaténation classique
                     pendingState.set(item.x + ',' + item.y, item.color);
                 }
             }
@@ -997,7 +1011,6 @@ const FRONTEND_HTML = `
 
             if (brushMode === 'normal') {
                 if (bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
-                    // CORRECTION : Concaténation classique
                     const key = bx + ',' + by;
                     // Vérifie d'abord si c'est dans la file d'attente
                     if (pendingState.has(key)) {
@@ -1032,7 +1045,6 @@ const FRONTEND_HTML = `
                         const py = by + dy;
                         
                         if (px >= 0 && px < SIZE && py >= 0 && py < SIZE) {
-                            // CORRECTION : Concaténation classique
                             const key = px + ',' + py;
                             
                             // 1. Est-ce que le pixel va déjà être repeint de la bonne couleur par la file d'attente ?
