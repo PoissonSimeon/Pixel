@@ -171,7 +171,7 @@ const FRONTEND_HTML = `
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; user-select: none; }
         
-        #app { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
+        #app { display: flex; flex-direction: column; height: 100vh; width: 100vw; position: relative; }
         
         #canvas-wrapper { flex: 1; position: relative; overflow: hidden; background: #1a1a1a; cursor: crosshair; }
         canvas { display: block; touch-action: none; width: 100%; height: 100%; }
@@ -206,10 +206,36 @@ const FRONTEND_HTML = `
         .coords { color: #aaa; width: 90px; }
         .online-dot { color: #4caf50; font-size: 16px; }
         #status { color: #f44336; border-left: 1px solid #444; padding-left: 15px; }
+
+        /* UI de la Barre de Progression Dynamique */
+        #progress-container {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(20, 20, 20, 0.9); padding: 12px 20px; border-radius: 15px;
+            border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(15px);
+            display: flex; flex-direction: column; gap: 8px; width: 280px; z-index: 30;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.6);
+            opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+        }
+        #progress-container.show { opacity: 1; }
+        .progress-info { display: flex; justify-content: space-between; color: white; font-size: 13px; font-weight: bold; }
+        .progress-bar-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
+        #progress-bar-fill { height: 100%; width: 0%; background: #4caf50; transition: width 0.1s linear; }
     </style>
 </head>
 <body>
     <div id="app">
+        
+        <!-- Jauge d'envoi dynamique -->
+        <div id="progress-container">
+            <div class="progress-info">
+                <span id="progress-text">0%</span>
+                <span id="progress-remaining">0 pixel en attente</span>
+            </div>
+            <div class="progress-bar-bg">
+                <div id="progress-bar-fill"></div>
+            </div>
+        </div>
+
         <div id="canvas-wrapper">
             <canvas id="viewCanvas"></canvas>
             
@@ -270,6 +296,12 @@ const FRONTEND_HTML = `
         const onlineCount = document.getElementById('onlineCount');
         const exportBtn = document.getElementById('exportBtn');
 
+        // Variables Jauge de Progression
+        const progressContainer = document.getElementById('progress-container');
+        const progressBarFill = document.getElementById('progress-bar-fill');
+        const progressText = document.getElementById('progress-text');
+        const progressRemaining = document.getElementById('progress-remaining');
+
         const SIZE = 1000;
         let scale = 1;
         let offsetX = 0;
@@ -294,6 +326,9 @@ const FRONTEND_HTML = `
         let lastSendTime = 0;
         let hoverX = -1;
         let hoverY = -1;
+
+        let totalPendingBatch = 0;
+        let progressHideTimeout;
 
         // --- GESTION DES COULEURS ---
         var colorPicker = new iro.ColorPicker("#colorPickerWheel", {
@@ -341,6 +376,36 @@ const FRONTEND_HTML = `
         btnPipette.addEventListener('click', () => { currentTool = 'pipette'; btnPipette.classList.add('active'); btnBrush.classList.remove('active'); wrapper.style.cursor = 'crosshair'; });
 
         canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+        // --- GESTION DE LA JAUGE ---
+        function updateProgressBar() {
+            if (pendingQueue.length === 0) {
+                progressBarFill.style.width = '100%';
+                progressText.innerText = '100%';
+                progressRemaining.innerText = '0 restant';
+                
+                clearTimeout(progressHideTimeout);
+                progressHideTimeout = setTimeout(() => {
+                    if (pendingQueue.length === 0) {
+                        progressContainer.classList.remove('show');
+                        totalPendingBatch = 0;
+                    }
+                }, 1000);
+            } else {
+                clearTimeout(progressHideTimeout);
+                progressContainer.classList.add('show');
+                
+                // Sécurité pour ne pas diviser par zéro ou avoir un pourcentage négatif
+                if (totalPendingBatch < pendingQueue.length) totalPendingBatch = pendingQueue.length;
+                
+                const sent = totalPendingBatch - pendingQueue.length;
+                const percent = totalPendingBatch === 0 ? 0 : Math.floor((sent / totalPendingBatch) * 100);
+                
+                progressBarFill.style.width = percent + '%';
+                progressText.innerText = percent + '%';
+                progressRemaining.innerText = pendingQueue.length + (pendingQueue.length > 1 ? ' restants' : ' restant');
+            }
+        }
 
         // --- GESTION DU ZOOM ---
         function applyZoom(newScale, centerOnScreen = false, targetX = 0, targetY = 0) {
@@ -526,9 +591,13 @@ const FRONTEND_HTML = `
                     offCtx.fillStyle = data.color;
                     offCtx.fillRect(data.x, data.y, dataSize, dataSize);
                     
-                    // CORRECTION : Filtre plus robuste pour garantir de ne jamais bloquer la file.
+                    const lenBefore = pendingQueue.length;
                     pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.size === dataSize));
-                    draw();
+                    
+                    if (pendingQueue.length !== lenBefore) {
+                        draw();
+                        updateProgressBar();
+                    }
                 } else if (data.type === 'error') {
                     // Les erreurs réseau sont silencieusement gérées par le client
                 } else if (data.type === 'stats') {
@@ -546,6 +615,9 @@ const FRONTEND_HTML = `
         function placePixel(bx, by) {
             if (pendingQueue.length > 500) return;
             
+            // Si la file était vide, on initialise un nouveau lot
+            if (pendingQueue.length === 0) totalPendingBatch = 0;
+            
             const offset = Math.floor(currentSize / 2);
             const startX = bx - offset;
             const startY = by - offset;
@@ -557,11 +629,12 @@ const FRONTEND_HTML = `
                 existing.retries = 0;
             } else {
                 pendingQueue.push({ x: startX, y: startY, color: currentColor, size: currentSize, retries: 0 });
+                totalPendingBatch++; // On augmente la taille totale du lot
             }
             draw();
+            updateProgressBar();
         }
 
-        // CORRECTION : Le délai client passe à 130ms (le serveur exige 100ms) pour absorber toutes les latences réseau.
         setInterval(() => {
             const now = Date.now();
             if (pendingQueue.length > 0 && now - lastSendTime >= 130) {
@@ -569,10 +642,10 @@ const FRONTEND_HTML = `
                     const p = pendingQueue[0]; 
                     p.retries = (p.retries || 0) + 1;
 
-                    // CORRECTION : 20 essais max. Si la connexion est instable, on abandonne le pixel au bout de ~2.5s pour débloquer la suite.
                     if (p.retries > 20) {
                         pendingQueue.shift();
                         draw();
+                        updateProgressBar(); // Mise à jour si on abandonne un point
                         return;
                     }
 
@@ -619,4 +692,3 @@ const FRONTEND_HTML = `
     </script>
 </body>
 </html>
-`;
