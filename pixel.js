@@ -238,6 +238,9 @@ const FRONTEND_HTML = `
         let lastMouseY = 0;
         let isMoved = false;
         let currentTool = 'brush'; // 'brush' or 'pipette'
+        
+        let pendingQueue = []; // File d'attente pour les pixels posés localement
+        let lastSendTime = 0;
 
         // Synchro de la couleur
         function updateColor(hex) {
@@ -288,6 +291,11 @@ const FRONTEND_HTML = `
             if(bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
                 valX.innerText = bx;
                 valY.innerText = by;
+                
+                // Peindre en continu si le clic gauche est maintenu et qu'on ne déplace pas la caméra
+                if (e.buttons === 1 && currentTool === 'brush' && !isDragging && isReady) {
+                    placePixel(bx, by);
+                }
             }
 
             if (!isDragging) return;
@@ -368,6 +376,27 @@ const FRONTEND_HTML = `
             offCtx.putImageData(imgData, 0, 0);
             ctx.imageSmoothingEnabled = false; 
             ctx.drawImage(offCanvas, offsetX, offsetY, SIZE * scale, SIZE * scale);
+
+            // Dessiner les pixels en attente d'envoi (avec encadré blanc)
+            for (const p of pendingQueue) {
+                const pxX = offsetX + p.x * scale;
+                const pxY = offsetY + p.y * scale;
+                
+                ctx.fillStyle = p.color;
+                ctx.fillRect(pxX, pxY, scale, scale);
+                
+                // Encadré blanc
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = scale > 5 ? 2 : 1;
+                ctx.strokeRect(pxX, pxY, scale, scale);
+                
+                // Petit contour intérieur noir pour une meilleure visibilité sur fond clair (quand zoomé)
+                if (scale > 5) {
+                    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(pxX + 2, pxY + 2, scale - 4, scale - 4);
+                }
+            }
         }
 
         let ws;
@@ -385,6 +414,14 @@ const FRONTEND_HTML = `
                     imgData.data[idx+1] = g;
                     imgData.data[idx+2] = b;
                     imgData.data[idx+3] = 255;
+                    
+                    // Si on reçoit la validation, on retire le pixel de la file d'attente
+                    pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.color.toLowerCase() === data.color.toLowerCase()));
+                    
+                    draw();
+                } else if (data.type === 'error') {
+                    // Si le serveur rejette (spam, etc), on supprime le pixel bloquant pour avancer dans la file
+                    pendingQueue.shift();
                     draw();
                 } else if (data.type === 'stats') {
                     onlineCount.innerText = data.online;
@@ -407,26 +444,48 @@ const FRONTEND_HTML = `
         }
 
         function placePixel(bx, by) {
-            const now = Date.now();
-            if (now - lastClickTime < 500) return;
+            // Limite la file d'attente (évite de faire crasher le navigateur si on peint des milliers de pixels sans internet)
+            if (pendingQueue.length > 500) return;
 
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                lastClickTime = now;
-                ws.send(JSON.stringify({
-                    type: 'pixel',
-                    x: bx,
-                    y: by,
-                    color: colorPicker.value
-                }));
-                
-                cooldownBar.style.transition = 'none';
-                cooldownBar.style.width = '0%';
-                setTimeout(() => {
-                    cooldownBar.style.transition = 'width 0.5s linear';
-                    cooldownBar.style.width = '100%';
-                }, 10);
+            const color = colorPicker.value;
+            const existing = pendingQueue.find(p => p.x === bx && p.y === by);
+            
+            // Si le pixel est déjà dans la file locale, on met juste sa couleur à jour
+            if (existing) {
+                existing.color = color;
+            } else {
+                pendingQueue.push({ x: bx, y: by, color: color });
             }
+            draw();
         }
+
+        // Boucle d'envoi automatique au serveur (1 pixel toutes les 550ms)
+        setInterval(() => {
+            const now = Date.now();
+            // On utilise 550ms pour être parfaitement sûr de passer le contrôle de 500ms du serveur
+            if (pendingQueue.length > 0 && now - lastSendTime >= 550) {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    const p = pendingQueue[0]; // Récupère le pixel le plus ancien
+                    
+                    ws.send(JSON.stringify({
+                        type: 'pixel',
+                        x: p.x,
+                        y: p.y,
+                        color: p.color
+                    }));
+                    
+                    lastSendTime = now;
+                    
+                    // Animation de la barre de progression pour indiquer le rythme d'envoi
+                    cooldownBar.style.transition = 'none';
+                    cooldownBar.style.width = '0%';
+                    setTimeout(() => {
+                        cooldownBar.style.transition = 'width 0.5s linear';
+                        cooldownBar.style.width = '100%';
+                    }, 10);
+                }
+            }
+        }, 50); // Vérification de la file très récurrente
 
         exportBtn.addEventListener('click', () => {
             const link = document.createElement('a');
