@@ -453,18 +453,15 @@ const FRONTEND_HTML = `
                 const data = JSON.parse(event.data);
                 
                 if (data.type === 'pixel') {
-                    const { r, g, b } = hexToRgb(data.color);
-                    
-                    // CORRECTION MAJEURE : Force l'écriture directe dans la mémoire GPU
-                    const id = offCtx.createImageData(1, 1);
-                    id.data[0] = r; id.data[1] = g; id.data[2] = b; id.data[3] = 255;
-                    offCtx.putImageData(id, data.x, data.y);
+                    // CORRECTION : Plus besoin de convertir en RGB, fillRect comprend directement le format Hexadécimal natif (#ff0000)
+                    offCtx.fillStyle = data.color;
+                    offCtx.fillRect(data.x, data.y, 1, 1);
                     
                     pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.color.toLowerCase() === data.color.toLowerCase()));
                     draw();
                 } else if (data.type === 'error') {
-                    pendingQueue.shift();
-                    draw();
+                    // CORRECTION : En cas d'erreur de délai (latence réseau), on NE supprime PLUS le pixel de la file. 
+                    // Il restera en attente et sera renvoyé automatiquement sans disparaître.
                 } else if (data.type === 'stats') {
                     onlineCount.innerText = data.online;
                 }
@@ -481,17 +478,31 @@ const FRONTEND_HTML = `
             if (pendingQueue.length > 500) return;
             const existing = pendingQueue.find(p => p.x === bx && p.y === by);
             
-            if (existing) existing.color = currentColor;
-            else pendingQueue.push({ x: bx, y: by, color: currentColor });
+            if (existing) {
+                existing.color = currentColor;
+                existing.retries = 0; // Réinitialise les tentatives
+            } else {
+                pendingQueue.push({ x: bx, y: by, color: currentColor, retries: 0 });
+            }
             
             draw();
         }
 
         setInterval(() => {
             const now = Date.now();
+            // On s'assure de laisser passer au moins 110ms entre chaque envoi
             if (pendingQueue.length > 0 && now - lastSendTime >= 110) {
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     const p = pendingQueue[0]; 
+                    p.retries = (p.retries || 0) + 1;
+
+                    // Sécurité : si le serveur ignore vraiment un pixel (ex: données corrompues), on l'abandonne après 10 essais (~1 seconde)
+                    if (p.retries > 10) {
+                        pendingQueue.shift();
+                        draw();
+                        return;
+                    }
+
                     ws.send(JSON.stringify({ type: 'pixel', x: p.x, y: p.y, color: p.color }));
                     lastSendTime = now;
                 }
