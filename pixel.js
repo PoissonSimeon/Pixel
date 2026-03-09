@@ -970,7 +970,8 @@ const FRONTEND_HTML = `
         }
 
         function placePixel(bx, by) {
-            if (pendingQueue.length > 500) return;
+            // Limite augmentée à 2000 pour permettre de longs traits continus avant envoi
+            if (pendingQueue.length > 2000) return;
             if (pendingQueue.length === 0) totalPendingBatch = 0;
 
             const colorToUse = currentTool === 'eraser' ? DEFAULT_BG_COLOR : currentColor;
@@ -1073,7 +1074,8 @@ const FRONTEND_HTML = `
 
         setInterval(() => {
             const now = Date.now();
-            if (pendingQueue.length > 0 && now - lastSendTime >= 130) {
+            // L'envoi est mis en PAUSE (!isPainting) tant que l'utilisateur maintient son trait
+            if (!isPainting && pendingQueue.length > 0 && now - lastSendTime >= 130) {
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     const p = pendingQueue[0]; 
                     p.retries = (p.retries || 0) + 1;
