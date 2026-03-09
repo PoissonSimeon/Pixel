@@ -156,78 +156,87 @@ const FRONTEND_HTML = `
     <!-- Importation de la roue chromatique iro.js -->
     <script src="https://cdn.jsdelivr.net/npm/@jaames/iro@5"></script>
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #1a1a1a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; user-select: none; }
-        canvas { display: block; touch-action: none; cursor: crosshair; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; user-select: none; }
         
-        #ui { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(20, 20, 20, 0.85); padding: 12px 25px; border-radius: 40px; display: flex; gap: 20px; align-items: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); z-index: 10; }
+        /* Architecture principale : Colonne Flex */
+        #app { display: flex; flex-direction: column; height: 100vh; width: 100vw; }
         
-        .tools { display: flex; gap: 10px; border-right: 1px solid rgba(255,255,255,0.2); padding-right: 20px; }
+        /* Conteneur de la toile */
+        #canvas-wrapper { flex: 1; position: relative; overflow: hidden; background: #1a1a1a; cursor: crosshair; }
+        canvas { display: block; touch-action: none; width: 100%; height: 100%; }
+        
+        /* Barre d'outils fixe en bas (HUD) */
+        #hud { 
+            background: #1e1e1e; border-top: 1px solid #333; padding: 12px 20px; 
+            display: flex; justify-content: center; align-items: center; 
+            flex-wrap: wrap; gap: 25px; z-index: 20; box-shadow: 0 -5px 20px rgba(0,0,0,0.5);
+        }
+
+        .hud-group { display: flex; align-items: center; gap: 12px; }
+
+        /* Outils */
         .tool-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 50%; width: 45px; height: 45px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; transition: all 0.2s; outline: none; padding: 0; }
         .tool-btn:hover { background: rgba(255,255,255,0.2); }
         .tool-btn.active { background: rgba(76, 175, 80, 0.5); border-color: #4caf50; box-shadow: 0 0 10px rgba(76, 175, 80, 0.5); }
 
+        /* Zoom */
+        .icon-btn { font-size: 18px; cursor: pointer; transition: transform 0.1s; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; color: white;}
+        .icon-btn:hover { transform: scale(1.2); }
+        #zoomSlider { cursor: pointer; width: 100px; accent-color: #4caf50; }
+
+        /* Couleurs */
         #color-btn-indicator { width: 45px; height: 45px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.5); cursor: pointer; box-shadow: 0 0 10px rgba(0,0,0,0.3); transition: transform 0.1s; }
         #color-btn-indicator:hover { transform: scale(1.1); border-color: white; }
 
-        #colorPanel { display: none; position: absolute; bottom: 95px; left: 50%; transform: translateX(-50%); background: rgba(20, 20, 20, 0.95); padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(15px); flex-direction: column; align-items: center; gap: 15px; box-shadow: 0 15px 40px rgba(0,0,0,0.6); z-index: 10; }
+        #colorPanel { display: none; position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(20, 20, 20, 0.95); padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(15px); flex-direction: column; align-items: center; gap: 15px; box-shadow: 0 15px 40px rgba(0,0,0,0.8); z-index: 10; }
         #hexInput { width: 90px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 16px; font-weight: bold; text-transform: uppercase; outline: none; border-radius: 8px; padding: 8px; text-align: center; }
 
-        #exportBtn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 50%; width: 45px; height: 45px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; transition: background 0.2s; outline: none; padding: 0; }
-        #exportBtn:hover { background: rgba(255,255,255,0.2); }
-
-        .info-block { display: flex; flex-direction: column; color: #fff; }
-        .info-label { font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
-        .info-value { font-size: 16px; font-weight: bold; }
-        
-        #top-info { position: absolute; top: 15px; right: 15px; background: rgba(20, 20, 20, 0.85); padding: 8px 15px; border-radius: 20px; color: #fff; font-size: 13px; font-weight: bold; display: flex; gap: 15px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); pointer-events: none; z-index: 10; }
-        .online-dot { color: #4caf50; }
-
-        /* UI de la barre de Zoom */
-        #zoom-container { position: absolute; bottom: 30px; left: 30px; background: rgba(20, 20, 20, 0.85); padding: 12px 20px; border-radius: 40px; display: flex; align-items: center; gap: 15px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); color: white; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 10; }
-        .zoom-icon { font-size: 18px; cursor: pointer; user-select: none; transition: transform 0.1s; }
-        .zoom-icon:hover { transform: scale(1.2); }
-        #zoomSlider { cursor: pointer; width: 120px; accent-color: #4caf50; }
+        /* Panneau d'informations */
+        .info-group { color: #fff; font-size: 13px; font-weight: bold; background: rgba(0,0,0,0.3); padding: 8px 15px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.05); display: flex; gap: 15px; }
+        .info-group span { display: flex; align-items: center; gap: 5px; }
+        .coords { color: #aaa; width: 90px; }
+        .online-dot { color: #4caf50; font-size: 16px; }
+        #status { color: #f44336; border-left: 1px solid #444; padding-left: 15px; }
     </style>
 </head>
 <body>
-    <canvas id="viewCanvas"></canvas>
-    
-    <div id="top-info">
-        <span>X: <span id="valX">0</span> Y: <span id="valY">0</span></span>
-        <span><span class="online-dot">●</span> <span id="onlineCount">1</span> en ligne</span>
-    </div>
-
-    <!-- Interface du Zoom à gauche -->
-    <div id="zoom-container">
-        <span class="zoom-icon" id="zoomOutBtn" title="Dézoom max">➖</span>
-        <input type="range" id="zoomSlider" min="0.1" max="30" step="0.1" value="1">
-        <span class="zoom-icon" id="zoomInBtn" title="Zoom max">➕</span>
-    </div>
-
-    <!-- Menu flottant Roue des Couleurs -->
-    <div id="colorPanel">
-        <div id="colorPickerWheel"></div>
-        <input type="text" id="hexInput" value="#ff0000" maxlength="7">
-    </div>
-
-    <div id="ui">
-        <div class="tools">
-            <button id="btnBrush" class="tool-btn active" title="Pinceau">🖌️</button>
-            <button id="btnPipette" class="tool-btn" title="Pipette">💧</button>
+    <div id="app">
+        <!-- Zone dédiée au dessin et au panneau de couleur (Isolée) -->
+        <div id="canvas-wrapper">
+            <canvas id="viewCanvas"></canvas>
+            
+            <div id="colorPanel">
+                <div id="colorPickerWheel"></div>
+                <input type="text" id="hexInput" value="#ff0000" maxlength="7">
+            </div>
         </div>
-        
-        <!-- Bouton de couleur principal -->
-        <div id="color-btn-indicator" style="background-color: #ff0000;" title="Choisir une couleur"></div>
-        
-        <button id="exportBtn" title="Exporter la toile en PNG">💾</button>
-        <div class="info-block">
-            <span class="info-label">État</span>
-            <span class="info-value" id="status">Connexion...</span>
+
+        <!-- HUD Fixe en bas -->
+        <div id="hud">
+            <div class="hud-group">
+                <span class="icon-btn" id="zoomOutBtn" title="Dézoom max">➖</span>
+                <input type="range" id="zoomSlider" min="0.1" max="30" step="0.1" value="1">
+                <span class="icon-btn" id="zoomInBtn" title="Zoom max">➕</span>
+            </div>
+
+            <div class="hud-group">
+                <button id="btnBrush" class="tool-btn active" title="Pinceau">🖌️</button>
+                <button id="btnPipette" class="tool-btn" title="Pipette">💧</button>
+                <div id="color-btn-indicator" style="background-color: #ff0000;" title="Choisir une couleur"></div>
+                <button id="exportBtn" class="tool-btn" title="Exporter la toile en PNG">💾</button>
+            </div>
+
+            <div class="hud-group info-group">
+                <span class="coords">X:<span id="valX">0</span> Y:<span id="valY">0</span></span>
+                <span><span class="online-dot">●</span> <span id="onlineCount">1</span> en ligne</span>
+                <span id="status">Connexion...</span>
+            </div>
         </div>
     </div>
 
     <script>
         const canvas = document.getElementById('viewCanvas');
+        const wrapper = document.getElementById('canvas-wrapper');
         const ctx = canvas.getContext('2d', { alpha: false });
         
         const btnBrush = document.getElementById('btnBrush');
@@ -251,20 +260,21 @@ const FRONTEND_HTML = `
         let offsetX = 0;
         let offsetY = 0;
         let isReady = false;
-        let lastClickTime = 0;
 
         const offCanvas = document.createElement('canvas');
         offCanvas.width = SIZE;
         offCanvas.height = SIZE;
         const offCtx = offCanvas.getContext('2d', { alpha: false });
 
-        let isDragging = false;
+        // Nouveaux indicateurs d'interaction stricts
+        let isPanning = false;
+        let isPainting = false;
+        let isMoved = false;
         let lastMouseX = 0;
         let lastMouseY = 0;
-        let isMoved = false;
+        
         let currentTool = 'brush'; 
         let currentColor = '#ff0000';
-        
         let pendingQueue = []; 
         let lastSendTime = 0;
 
@@ -299,19 +309,18 @@ const FRONTEND_HTML = `
             if (/^#[0-9a-fA-F]{6}$/.test(val)) updateColor(val);
         });
 
-        // Afficher / Cacher le panneau des couleurs
         colorBtnIndicator.addEventListener('click', () => {
             colorPanel.style.display = colorPanel.style.display === 'flex' ? 'none' : 'flex';
         });
 
-        // Fermer le panneau si on clique ailleurs sur la toile
+        // Fermeture automatique du panneau au clic sur la toile
         canvas.addEventListener('mousedown', () => {
             if (colorPanel.style.display === 'flex') colorPanel.style.display = 'none';
         });
 
         // --- GESTION DES OUTILS ---
-        btnBrush.addEventListener('click', () => { currentTool = 'brush'; btnBrush.classList.add('active'); btnPipette.classList.remove('active'); canvas.style.cursor = 'crosshair'; });
-        btnPipette.addEventListener('click', () => { currentTool = 'pipette'; btnPipette.classList.add('active'); btnBrush.classList.remove('active'); canvas.style.cursor = 'crosshair'; });
+        btnBrush.addEventListener('click', () => { currentTool = 'brush'; btnBrush.classList.add('active'); btnPipette.classList.remove('active'); wrapper.style.cursor = 'crosshair'; });
+        btnPipette.addEventListener('click', () => { currentTool = 'pipette'; btnPipette.classList.add('active'); btnBrush.classList.remove('active'); wrapper.style.cursor = 'crosshair'; });
 
         canvas.addEventListener('contextmenu', e => e.preventDefault());
 
@@ -321,8 +330,8 @@ const FRONTEND_HTML = `
             const actualZoomFactor = newScale / scale;
             
             if (centerOnScreen) {
-                targetX = window.innerWidth / 2;
-                targetY = window.innerHeight / 2;
+                targetX = canvas.width / 2;
+                targetY = canvas.height / 2;
             }
             
             offsetX = targetX - (targetX - offsetX) * actualZoomFactor;
@@ -341,87 +350,117 @@ const FRONTEND_HTML = `
             e.preventDefault();
             const zoomSpeed = 0.002;
             const zoomFactor = Math.exp(e.deltaY * -zoomSpeed);
-            applyZoom(scale * zoomFactor, false, e.clientX, e.clientY);
+            const pos = getEventData(e);
+            applyZoom(scale * zoomFactor, false, pos.canvasX, pos.canvasY);
         }, {passive: false});
 
-        // --- NAVIGATION ET DESSIN ---
+        // --- NAVIGATION ET DESSIN STRICTS ---
         function resize() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+            // S'adapte exactement au wrapper, excluant le HUD
+            canvas.width = wrapper.clientWidth;
+            canvas.height = wrapper.clientHeight;
             if(scale === 1 && offsetX === 0 && offsetY === 0) {
-                scale = Math.min(window.innerWidth / SIZE, window.innerHeight / SIZE) * 0.9;
-                offsetX = (window.innerWidth - (SIZE * scale)) / 2;
-                offsetY = (window.innerHeight - (SIZE * scale)) / 2;
+                scale = Math.min(canvas.width / SIZE, canvas.height / SIZE) * 0.9;
+                offsetX = (canvas.width - (SIZE * scale)) / 2;
+                offsetY = (canvas.height - (SIZE * scale)) / 2;
                 zoomSlider.value = scale;
             }
             draw();
         }
         window.addEventListener('resize', resize);
         
-        function onPointerDown(e) {
-            if (e.button === 2 || e.touches) isDragging = true;
-            isMoved = false;
-            lastMouseX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
-            lastMouseY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
+        function getEventData(e) {
+            let cx = 0, cy = 0;
+            if (e.touches && e.touches.length > 0) {
+                cx = e.touches[0].clientX; cy = e.touches[0].clientY;
+            } else if (e.changedTouches && e.changedTouches.length > 0) {
+                cx = e.changedTouches[0].clientX; cy = e.changedTouches[0].clientY;
+            } else {
+                cx = e.clientX; cy = e.clientY;
+            }
+            const rect = canvas.getBoundingClientRect();
+            return {
+                screenX: cx, screenY: cy,
+                canvasX: cx - rect.left, canvasY: cy - rect.top
+            };
         }
-        function onPointerMove(e) {
-            const clientX = e.clientX || (e.touches ? e.touches[0].clientX : lastMouseX);
-            const clientY = e.clientY || (e.touches ? e.touches[0].clientY : lastMouseY);
-            
-            const bx = Math.floor((clientX - offsetX) / scale);
-            const by = Math.floor((clientY - offsetY) / scale);
+
+        function triggerTool(cx, cy) {
+            const bx = Math.floor((cx - offsetX) / scale);
+            const by = Math.floor((cy - offsetY) / scale);
             if(bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
-                valX.innerText = bx;
-                valY.innerText = by;
-                
-                if (e.buttons === 1 && currentTool === 'brush' && !isDragging && isReady) {
-                    placePixel(bx, by);
+                if (currentTool === 'brush') placePixel(bx, by);
+                else if (currentTool === 'pipette') pickColor(bx, by);
+            }
+        }
+
+        // Ecoute uniquement sur le canvas pour démarrer une action
+        canvas.addEventListener('mousedown', (e) => {
+            const pos = getEventData(e);
+            lastMouseX = pos.screenX; lastMouseY = pos.screenY;
+            isMoved = false;
+            
+            if (e.button === 2) isPanning = true;
+            else if (e.button === 0) {
+                isPainting = true;
+                triggerTool(pos.canvasX, pos.canvasY);
+            }
+        });
+
+        canvas.addEventListener('touchstart', (e) => {
+            const pos = getEventData(e);
+            lastMouseX = pos.screenX; lastMouseY = pos.screenY;
+            isMoved = false;
+            isPanning = true; // Le tactile glisse par défaut (Pan)
+        }, {passive: false});
+
+        function handleMove(e) {
+            const pos = getEventData(e);
+            
+            // Mise à jour des coordonnées textuelles si au-dessus de la toile
+            if (e.target === canvas) {
+                const bx = Math.floor((pos.canvasX - offsetX) / scale);
+                const by = Math.floor((pos.canvasY - offsetY) / scale);
+                if(bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
+                    valX.innerText = bx;
+                    valY.innerText = by;
                 }
             }
 
-            if (!isDragging) return;
-            isMoved = true;
-
-            offsetX += clientX - lastMouseX;
-            offsetY += clientY - lastMouseY;
-            lastMouseX = clientX;
-            lastMouseY = clientY;
-            draw();
-        }
-        function onPointerUp(e) {
-            isDragging = false;
-            if (e.button === 2) return;
-
-            if (!isMoved && isReady && (e.button === 0 || e.changedTouches)) {
-                const clientX = e.clientX || (e.changedTouches ? e.changedTouches[0].clientX : lastMouseX);
-                const clientY = e.clientY || (e.changedTouches ? e.changedTouches[0].clientY : lastMouseY);
-                
-                const bx = Math.floor((clientX - offsetX) / scale);
-                const by = Math.floor((clientY - offsetY) / scale);
-                
-                if (bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
-                    if (currentTool === 'brush') placePixel(bx, by);
-                    else if (currentTool === 'pipette') pickColor(bx, by);
-                }
+            if (isPanning) {
+                isMoved = true;
+                offsetX += pos.screenX - lastMouseX;
+                offsetY += pos.screenY - lastMouseY;
+                draw();
+            } else if (isPainting && currentTool === 'brush') {
+                triggerTool(pos.canvasX, pos.canvasY);
             }
+            
+            lastMouseX = pos.screenX; lastMouseY = pos.screenY;
         }
+
+        window.addEventListener('mousemove', handleMove);
+        window.addEventListener('touchmove', handleMove, {passive: false});
+
+        window.addEventListener('mouseup', () => {
+            isPanning = false; isPainting = false;
+        });
+
+        window.addEventListener('touchend', (e) => {
+            // Un tap tactile sans glisser équivaut à un clic de pinceau
+            if (isPanning && !isMoved && e.target === canvas) {
+                const pos = getEventData(e);
+                triggerTool(pos.canvasX, pos.canvasY);
+            }
+            isPanning = false; isPainting = false;
+        });
 
         function pickColor(x, y) {
-            // Lecture exacte du pixel sur le canvas offscreen (garantit 100% de fiabilité)
             const p = offCtx.getImageData(x, y, 1, 1).data;
             const hex = "#" + (1 << 24 | p[0] << 16 | p[1] << 8 | p[2]).toString(16).padStart(6, '0').slice(-6);
-            
             updateColor(hex);
-            btnBrush.click(); // Retour au pinceau
+            btnBrush.click();
         }
-
-        canvas.addEventListener('mousedown', onPointerDown);
-        window.addEventListener('mousemove', onPointerMove);
-        window.addEventListener('mouseup', onPointerUp);
-        
-        canvas.addEventListener('touchstart', onPointerDown, {passive: false});
-        window.addEventListener('touchmove', onPointerMove, {passive: false});
-        window.addEventListener('touchend', onPointerUp);
 
         // --- MOTEUR DE RENDU ---
         function draw() {
@@ -453,15 +492,13 @@ const FRONTEND_HTML = `
                 const data = JSON.parse(event.data);
                 
                 if (data.type === 'pixel') {
-                    // CORRECTION : Plus besoin de convertir en RGB, fillRect comprend directement le format Hexadécimal natif (#ff0000)
                     offCtx.fillStyle = data.color;
                     offCtx.fillRect(data.x, data.y, 1, 1);
                     
                     pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.color.toLowerCase() === data.color.toLowerCase()));
                     draw();
                 } else if (data.type === 'error') {
-                    // CORRECTION : En cas d'erreur de délai (latence réseau), on NE supprime PLUS le pixel de la file. 
-                    // Il restera en attente et sera renvoyé automatiquement sans disparaître.
+                    // Les retries sont gérés ci-dessous
                 } else if (data.type === 'stats') {
                     onlineCount.innerText = data.online;
                 }
@@ -480,23 +517,20 @@ const FRONTEND_HTML = `
             
             if (existing) {
                 existing.color = currentColor;
-                existing.retries = 0; // Réinitialise les tentatives
+                existing.retries = 0;
             } else {
                 pendingQueue.push({ x: bx, y: by, color: currentColor, retries: 0 });
             }
-            
             draw();
         }
 
         setInterval(() => {
             const now = Date.now();
-            // On s'assure de laisser passer au moins 110ms entre chaque envoi
             if (pendingQueue.length > 0 && now - lastSendTime >= 110) {
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     const p = pendingQueue[0]; 
                     p.retries = (p.retries || 0) + 1;
 
-                    // Sécurité : si le serveur ignore vraiment un pixel (ex: données corrompues), on l'abandonne après 10 essais (~1 seconde)
                     if (p.retries > 10) {
                         pendingQueue.shift();
                         draw();
