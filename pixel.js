@@ -381,7 +381,7 @@ const FRONTEND_HTML = `
         const btnPipette = document.getElementById('btnPipette');
         const btnCursors = document.getElementById('btnCursors');
         const btnPseudo = document.getElementById('btnPseudo');
-        const emojiPanel = document.getElementById('emojiPanel'); // Composant Web <emoji-picker>
+        const emojiPanel = document.getElementById('emojiPanel'); 
 
         const colorBtnIndicator = document.getElementById('color-btn-indicator');
         const colorPanel = document.getElementById('colorPanel');
@@ -452,13 +452,13 @@ const FRONTEND_HTML = `
 
         // --- GESTION DU PSEUDO (CLAVIER EMOJI COMPLET) ---
         btnPseudo.addEventListener('click', () => {
-            const isVisible = emojiPanel.style.display === 'block'; // block est natif pour ce composant
+            const isVisible = emojiPanel.style.display === 'block'; 
             closeAllPanels();
             if (!isVisible) emojiPanel.style.display = 'block';
         });
 
         emojiPanel.addEventListener('emoji-click', event => {
-            myEmoji = event.detail.unicode; // Récupère l'emoji sélectionné (gère toutes les couleurs de peau)
+            myEmoji = event.detail.unicode; 
             btnPseudo.innerText = "Pseudo: " + myEmoji;
             closeAllPanels();
         });
@@ -749,27 +749,26 @@ const FRONTEND_HTML = `
             }
         });
 
-        // Tactile
+        // Tactile : Gérer le saut/téléportation
         canvas.addEventListener('touchstart', (e) => {
-            // Empêcher uniquement si on est sur le canevas principal pour dessiner/zoomer
             if (e.target === canvas) e.preventDefault();
             
             if (e.touches.length === 2) {
-                // 2 Doigts : Pan + Pinch
                 isPinching = true;
                 isPanning = true;
                 isPainting = false;
                 lastPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                // On met à jour l'ancrage au moment exact où les 2 doigts sont posés pour éviter le saut
                 lastMouseX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
                 lastMouseY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
             } else if (e.touches.length === 1 && e.target === canvas) {
-                // 1 Doigt : Dessiner
                 isPinching = false;
                 isPanning = false;
                 isPainting = true; 
                 isMoved = false;
                 const pos = getEventData(e);
-                lastMouseX = pos.screenX; lastMouseY = pos.screenY;
+                lastMouseX = pos.screenX; 
+                lastMouseY = pos.screenY;
                 triggerTool(pos.canvasX, pos.canvasY);
                 emitCursorPosition();
             }
@@ -777,7 +776,6 @@ const FRONTEND_HTML = `
 
         function handleMove(e) {
             if (isPinching && e.touches && e.touches.length === 2) {
-                // Gestion du Pinch-to-Zoom et Pan simultanés
                 const currentDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
                 const zoomFactor = currentDist / lastPinchDist;
                 lastPinchDist = currentDist;
@@ -786,13 +784,15 @@ const FRONTEND_HTML = `
                 const centerClientY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
                 const rect = canvas.getBoundingClientRect();
                 
-                applyZoom(scale * zoomFactor, false, centerClientX - rect.left, centerClientY - rect.top);
-                
+                // CORRECTION DU TP : On effectue le déplacement (Pan) en premier
                 offsetX += centerClientX - lastMouseX;
                 offsetY += centerClientY - lastMouseY;
+                
                 lastMouseX = centerClientX;
                 lastMouseY = centerClientY;
-                draw();
+
+                // Ensuite on applique le zoom sur le nouveau centre
+                applyZoom(scale * zoomFactor, false, centerClientX - rect.left, centerClientY - rect.top);
                 return;
             }
 
@@ -831,7 +831,16 @@ const FRONTEND_HTML = `
         canvas.addEventListener('mouseleave', () => { hoverX = -1; hoverY = -1; draw(); });
 
         window.addEventListener('touchend', (e) => {
-            if (e.touches && e.touches.length < 2) isPinching = false;
+            // CORRECTION DU TP : Quand on retire un doigt après un zoom, on stop tout pour ne pas générer de coup de pinceau accidentel
+            if (e.touches && e.touches.length < 2) {
+                isPinching = false;
+                if (e.touches.length === 1) {
+                    isPainting = false;
+                    isPanning = false;
+                    lastMouseX = e.touches[0].clientX;
+                    lastMouseY = e.touches[0].clientY;
+                }
+            }
             if (!e.touches || e.touches.length === 0) {
                 isPanning = false; 
                 isPainting = false;
@@ -892,7 +901,6 @@ const FRONTEND_HTML = `
             // Affichage des Emojis (Curseurs)
             if (showCursors) {
                 const now = Date.now();
-                // Assure que l'emoji est suffisamment grand même si la carte est très dézoomée
                 ctx.font = Math.max(20, scale * 2) + "px Arial";
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
@@ -943,8 +951,10 @@ const FRONTEND_HTML = `
                     const lenBefore = pendingQueue.length;
                     pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.shapeStr === shapeStr));
                     
+                    // CORRECTION MULTIJOUEUR : Forcer le dessin permet de voir immédiatement les pixels des autres joueurs !
+                    draw();
+                    
                     if (pendingQueue.length !== lenBefore) {
-                        draw();
                         updateProgressBar();
                     }
                 } else if (data.type === 'stats') {
@@ -1000,6 +1010,9 @@ const FRONTEND_HTML = `
 
             const existing = pendingQueue.find(p => p.x === bx && p.y === by && p.shapeStr === shapeStr);
             if (existing) {
+                // CORRECTION ANTI-SPAM : Si on repasse sur un pixel qui est DÉJÀ en attente avec la MÊME couleur, on l'ignore silencieusement.
+                if (existing.color === colorToUse) return;
+                
                 existing.color = colorToUse;
                 existing.retries = 0;
             } else {
