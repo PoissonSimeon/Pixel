@@ -100,7 +100,8 @@ wss.on('connection', (ws, req) => {
     sendOnlineCount();
 
     ws.on('message', (message) => {
-        if (message.length > 200) return ws.close(1009, 'Message trop lourd');
+        // La limite passe à 1024 pour permettre l'envoi de la matrice Custom 10x10 sans bloquer
+        if (message.length > 1024) return ws.close(1009, 'Message trop lourd');
 
         try {
             const data = JSON.parse(message);
@@ -117,31 +118,46 @@ wss.on('connection', (ws, req) => {
                 const x = Math.floor(data.x);
                 const y = Math.floor(data.y);
                 const color = data.color;
-                const size = parseInt(data.size) || 1;
+                const shape = data.shape; // Matrice custom
 
-                if (![1, 2, 4, 6, 8].includes(size)) return;
                 if (isNaN(x) || isNaN(y) || x < -10 || x >= BOARD_WIDTH || y < -10 || y >= BOARD_HEIGHT) return;
                 if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
 
                 const { r, g, b } = hexToRgb(color);
                 
                 // Application serveur
-                for (let i = 0; i < size; i++) {
-                    for (let j = 0; j < size; j++) {
-                        const px = x + i;
-                        const py = y + j;
+                if (shape && Array.isArray(shape)) {
+                    if (shape.length > 100) return; // Sécurité
+                    for (let i = 0; i < shape.length; i++) {
+                        const idx = parseInt(shape[i]);
+                        if (isNaN(idx) || idx < 0 || idx > 99) continue;
+                        
+                        // Calcul de la position par rapport au centre (5,5) de la matrice 10x10
+                        const dx = (idx % 10) - 5;
+                        const dy = Math.floor(idx / 10) - 5;
+                        const px = x + dx;
+                        const py = y + dy;
+                        
                         if (px >= 0 && px < BOARD_WIDTH && py >= 0 && py < BOARD_HEIGHT) {
-                            const idx = (py * BOARD_WIDTH + px) * 3;
-                            board[idx] = r;
-                            board[idx + 1] = g;
-                            board[idx + 2] = b;
+                            const boardIdx = (py * BOARD_WIDTH + px) * 3;
+                            board[boardIdx] = r;
+                            board[boardIdx + 1] = g;
+                            board[boardIdx + 2] = b;
                         }
+                    }
+                } else {
+                    // Pinceau normal 1x1
+                    if (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT) {
+                        const boardIdx = (y * BOARD_WIDTH + x) * 3;
+                        board[boardIdx] = r;
+                        board[boardIdx + 1] = g;
+                        board[boardIdx + 2] = b;
                     }
                 }
 
                 cooldowns.set(ip, now);
 
-                const broadcastMsg = JSON.stringify({ type: 'pixel', x, y, color, size });
+                const broadcastMsg = JSON.stringify({ type: 'pixel', x, y, color, shape });
                 wss.clients.forEach(client => {
                     if (client.readyState === ws.OPEN) client.send(broadcastMsg);
                 });
@@ -187,10 +203,8 @@ const FRONTEND_HTML = `
         .tool-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 50%; width: 45px; height: 45px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; transition: all 0.2s; outline: none; padding: 0; }
         .tool-btn:hover { background: rgba(255,255,255,0.2); }
         .tool-btn.active { background: rgba(76, 175, 80, 0.5); border-color: #4caf50; box-shadow: 0 0 10px rgba(76, 175, 80, 0.5); }
+        .tool-btn-txt { font-size: 14px; font-weight: bold; }
         
-        #brushSize { background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 15px; font-weight: bold; outline: none; border-radius: 8px; padding: 5px 10px; cursor: pointer; height: 40px; }
-        #brushSize option { background: #1a1a1a; }
-
         .icon-btn { font-size: 18px; cursor: pointer; transition: transform 0.1s; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; color: white;}
         .icon-btn:hover { transform: scale(1.2); }
         #zoomSlider { cursor: pointer; width: 100px; accent-color: #4caf50; }
@@ -198,8 +212,14 @@ const FRONTEND_HTML = `
         #color-btn-indicator { width: 45px; height: 45px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.5); cursor: pointer; box-shadow: 0 0 10px rgba(0,0,0,0.3); transition: transform 0.1s; }
         #color-btn-indicator:hover { transform: scale(1.1); border-color: white; }
 
-        #colorPanel { display: none; position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(20, 20, 20, 0.95); padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(15px); flex-direction: column; align-items: center; gap: 15px; box-shadow: 0 15px 40px rgba(0,0,0,0.8); z-index: 10; }
+        #colorPanel { display: none; position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%); background: rgba(20, 20, 20, 0.95); padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(15px); flex-direction: column; align-items: center; gap: 15px; box-shadow: 0 15px 40px rgba(0,0,0,0.8); z-index: 10; }
         #hexInput { width: 90px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 16px; font-weight: bold; text-transform: uppercase; outline: none; border-radius: 8px; padding: 8px; text-align: center; }
+
+        /* Editeur 10x10 Custom Brush */
+        #brushEditorContainer { display: none; background: #222; padding: 6px; border-radius: 8px; border: 1px solid #444; }
+        #brushEditor { display: grid; grid-template-columns: repeat(10, 1fr); width: 60px; height: 60px; background: #ccc; gap: 1px; border: 1px solid #555; cursor: crosshair; touch-action: none; }
+        .brush-cell { background: white; width: 100%; height: 100%; user-select: none; }
+        .brush-cell.active { background: black; }
 
         .info-group { color: #fff; font-size: 13px; font-weight: bold; background: rgba(0,0,0,0.3); padding: 8px 15px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.05); display: flex; gap: 15px; }
         .info-group span { display: flex; align-items: center; gap: 5px; }
@@ -253,14 +273,14 @@ const FRONTEND_HTML = `
             </div>
 
             <div class="hud-group">
-                <button id="btnBrush" class="tool-btn active" title="Pinceau">🖌️</button>
-                <select id="brushSize" title="Taille du pinceau">
-                    <option value="1">1x1</option>
-                    <option value="2">2x2</option>
-                    <option value="4">4x4</option>
-                    <option value="6">6x6</option>
-                    <option value="8">8x8</option>
-                </select>
+                <button id="btnBrushNormal" class="tool-btn tool-btn-txt active" title="Pinceau 1x1">1x1</button>
+                <button id="btnBrushCustom" class="tool-btn" title="Pinceau Personnalisé">🖌️</button>
+                
+                <!-- Editeur de pinceau custom (apparaît si Custom sélectionné) -->
+                <div id="brushEditorContainer">
+                    <div id="brushEditor"></div>
+                </div>
+
                 <button id="btnPipette" class="tool-btn" title="Pipette">💧</button>
                 <div id="color-btn-indicator" style="background-color: #ff0000;" title="Choisir une couleur"></div>
                 <button id="exportBtn" class="tool-btn" title="Exporter la toile en PNG">💾</button>
@@ -279,8 +299,11 @@ const FRONTEND_HTML = `
         const wrapper = document.getElementById('canvas-wrapper');
         const ctx = canvas.getContext('2d', { alpha: false });
         
-        const btnBrush = document.getElementById('btnBrush');
-        const brushSizeSelect = document.getElementById('brushSize');
+        const btnBrushNormal = document.getElementById('btnBrushNormal');
+        const btnBrushCustom = document.getElementById('btnBrushCustom');
+        const brushEditorContainer = document.getElementById('brushEditorContainer');
+        const brushEditor = document.getElementById('brushEditor');
+
         const btnPipette = document.getElementById('btnPipette');
         const colorBtnIndicator = document.getElementById('color-btn-indicator');
         const colorPanel = document.getElementById('colorPanel');
@@ -319,9 +342,10 @@ const FRONTEND_HTML = `
         let lastMouseX = 0;
         let lastMouseY = 0;
         
-        let currentTool = 'brush'; 
+        let currentTool = 'brush'; // 'brush' or 'pipette'
+        let brushMode = 'normal'; // 'normal' or 'custom'
         let currentColor = '#ff0000';
-        let currentSize = 1;
+        
         let pendingQueue = []; 
         let lastSendTime = 0;
         let hoverX = -1;
@@ -329,6 +353,68 @@ const FRONTEND_HTML = `
 
         let totalPendingBatch = 0;
         let progressHideTimeout;
+
+        // --- GESTION DE L'EDITEUR DE PINCEAU (10x10) ---
+        const customBrush = Array(100).fill(false);
+        // Forme par défaut (petit carré de 2x2 au centre)
+        customBrush[44] = true; customBrush[45] = true;
+        customBrush[54] = true; customBrush[55] = true;
+
+        for(let i=0; i<100; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'brush-cell' + (customBrush[i] ? ' active' : '');
+            cell.dataset.index = i;
+            brushEditor.appendChild(cell);
+        }
+
+        let isEditingBrush = false;
+        let brushPaintMode = true; // true = noir, false = blanc
+
+        function setBrushCell(idx, state) {
+            if (idx >= 0 && idx < 100) {
+                customBrush[idx] = state;
+                brushEditor.children[idx].className = 'brush-cell' + (state ? ' active' : '');
+            }
+        }
+
+        function handleBrushEditorInteraction(e, isTouch) {
+            if (!isEditingBrush && !isTouch) return;
+            const event = isTouch ? e.touches[0] : e;
+            const el = document.elementFromPoint(event.clientX, event.clientY);
+            if (el && el.classList.contains('brush-cell')) {
+                const idx = parseInt(el.dataset.index);
+                setBrushCell(idx, brushPaintMode);
+            }
+        }
+
+        brushEditor.addEventListener('mousedown', (e) => {
+            if(e.target.classList.contains('brush-cell')) {
+                isEditingBrush = true;
+                const idx = parseInt(e.target.dataset.index);
+                brushPaintMode = !customBrush[idx]; // Inverse la couleur du premier pixel touché
+                setBrushCell(idx, brushPaintMode);
+            }
+        });
+        window.addEventListener('mouseup', () => { isEditingBrush = false; });
+        brushEditor.addEventListener('mousemove', (e) => handleBrushEditorInteraction(e, false));
+
+        brushEditor.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const el = document.elementFromPoint(touch.clientX, touch.clientY);
+            if (el && el.classList.contains('brush-cell')) {
+                isEditingBrush = true;
+                const idx = parseInt(el.dataset.index);
+                brushPaintMode = !customBrush[idx];
+                setBrushCell(idx, brushPaintMode);
+            }
+        }, {passive: false});
+        brushEditor.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            handleBrushEditorInteraction(e, true);
+        }, {passive: false});
+        brushEditor.addEventListener('touchend', () => { isEditingBrush = false; });
+
 
         // --- GESTION DES COULEURS ---
         var colorPicker = new iro.ColorPicker("#colorPickerWheel", {
@@ -369,8 +455,6 @@ const FRONTEND_HTML = `
             if (/^#[0-9a-fA-F]{6}$/.test(val)) updateColor(val);
         });
 
-        brushSizeSelect.addEventListener('change', (e) => currentSize = parseInt(e.target.value));
-
         colorBtnIndicator.addEventListener('click', () => {
             colorPanel.style.display = colorPanel.style.display === 'flex' ? 'none' : 'flex';
         });
@@ -379,11 +463,35 @@ const FRONTEND_HTML = `
             if (colorPanel.style.display === 'flex') colorPanel.style.display = 'none';
         });
 
+
         // --- GESTION DES OUTILS ---
-        btnBrush.addEventListener('click', () => { currentTool = 'brush'; btnBrush.classList.add('active'); btnPipette.classList.remove('active'); wrapper.style.cursor = 'crosshair'; });
-        btnPipette.addEventListener('click', () => { currentTool = 'pipette'; btnPipette.classList.add('active'); btnBrush.classList.remove('active'); wrapper.style.cursor = 'crosshair'; });
+        function setActiveTool(toolBtn) {
+            btnBrushNormal.classList.remove('active');
+            btnBrushCustom.classList.remove('active');
+            btnPipette.classList.remove('active');
+            toolBtn.classList.add('active');
+            wrapper.style.cursor = 'crosshair';
+        }
+
+        btnBrushNormal.addEventListener('click', () => { 
+            currentTool = 'brush'; brushMode = 'normal'; 
+            setActiveTool(btnBrushNormal); 
+            brushEditorContainer.style.display = 'none'; 
+        });
+        
+        btnBrushCustom.addEventListener('click', () => { 
+            currentTool = 'brush'; brushMode = 'custom'; 
+            setActiveTool(btnBrushCustom); 
+            brushEditorContainer.style.display = 'block'; 
+        });
+
+        btnPipette.addEventListener('click', () => { 
+            currentTool = 'pipette'; 
+            setActiveTool(btnPipette); 
+        });
 
         canvas.addEventListener('contextmenu', e => e.preventDefault());
+
 
         // --- GESTION DE LA JAUGE ---
         function updateProgressBar() {
@@ -403,7 +511,6 @@ const FRONTEND_HTML = `
                 clearTimeout(progressHideTimeout);
                 progressContainer.classList.add('show');
                 
-                // Sécurité pour ne pas diviser par zéro ou avoir un pourcentage négatif
                 if (totalPendingBatch < pendingQueue.length) totalPendingBatch = pendingQueue.length;
                 
                 const sent = totalPendingBatch - pendingQueue.length;
@@ -555,7 +662,10 @@ const FRONTEND_HTML = `
             const p = offCtx.getImageData(x, y, 1, 1).data;
             const hex = "#" + (1 << 24 | p[0] << 16 | p[1] << 8 | p[2]).toString(16).padStart(6, '0').slice(-6);
             updateColor(hex);
-            btnBrush.click();
+            
+            // Retour au pinceau qui était sélectionné
+            if (brushMode === 'normal') btnBrushNormal.click();
+            else btnBrushCustom.click();
         }
 
         // --- MOTEUR DE RENDU ---
@@ -570,16 +680,34 @@ const FRONTEND_HTML = `
             ctx.imageSmoothingEnabled = false; 
             ctx.drawImage(offCanvas, 0, 0);
 
+            // Dessin des pixels en attente (selon leur forme)
             for (const p of pendingQueue) {
                 ctx.fillStyle = p.color;
-                ctx.fillRect(p.x + 0.1, p.y + 0.1, p.size - 0.2, p.size - 0.2);
+                if (p.shape) {
+                    for (const idx of p.shape) {
+                        const dx = (idx % 10) - 5;
+                        const dy = Math.floor(idx / 10) - 5;
+                        ctx.fillRect(p.x + dx + 0.1, p.y + dy + 0.1, 0.8, 0.8);
+                    }
+                } else {
+                    ctx.fillRect(p.x + 0.1, p.y + 0.1, 0.8, 0.8);
+                }
             }
 
+            // Prévisualisation du pinceau sous la souris
             if (hoverX >= 0 && currentTool === 'brush' && !isPanning) {
-                const offset = Math.floor(currentSize / 2);
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-                ctx.lineWidth = 1 / scale; 
-                ctx.strokeRect(hoverX - offset, hoverY - offset, currentSize, currentSize);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                if (brushMode === 'custom') {
+                    for (let i = 0; i < 100; i++) {
+                        if (customBrush[i]) {
+                            const dx = (i % 10) - 5;
+                            const dy = Math.floor(i / 10) - 5;
+                            ctx.fillRect(hoverX + dx, hoverY + dy, 1, 1);
+                        }
+                    }
+                } else {
+                    ctx.fillRect(hoverX, hoverY, 1, 1);
+                }
             }
             
             ctx.restore();
@@ -595,19 +723,28 @@ const FRONTEND_HTML = `
                 const data = JSON.parse(event.data);
                 
                 if (data.type === 'pixel') {
-                    const dataSize = data.size || 1;
                     offCtx.fillStyle = data.color;
-                    offCtx.fillRect(data.x, data.y, dataSize, dataSize);
+                    const shapeStr = data.shape ? JSON.stringify(data.shape) : null;
+
+                    if (data.shape) {
+                        for (const idx of data.shape) {
+                            const dx = (idx % 10) - 5;
+                            const dy = Math.floor(idx / 10) - 5;
+                            offCtx.fillRect(data.x + dx, data.y + dy, 1, 1);
+                        }
+                    } else {
+                        offCtx.fillRect(data.x, data.y, 1, 1);
+                    }
                     
                     const lenBefore = pendingQueue.length;
-                    pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.size === dataSize));
+                    pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.shapeStr === shapeStr));
                     
                     if (pendingQueue.length !== lenBefore) {
                         draw();
                         updateProgressBar();
                     }
                 } else if (data.type === 'error') {
-                    // Les erreurs réseau sont silencieusement gérées par le client
+                    // Les erreurs réseau sont gérées via les retries asynchrones
                 } else if (data.type === 'stats') {
                     onlineCount.innerText = data.online;
                 }
@@ -622,54 +759,66 @@ const FRONTEND_HTML = `
 
         function placePixel(bx, by) {
             if (pendingQueue.length > 500) return;
-            
-            // Si la file était vide, on initialise un nouveau lot
             if (pendingQueue.length === 0) totalPendingBatch = 0;
-            
-            const offset = Math.floor(currentSize / 2);
-            const startX = bx - offset;
-            const startY = by - offset;
 
-            // --- OPTIMISATION : Ne pas envoyer si la couleur est déjà la bonne ---
             const targetRgb = hexToRgbClient(currentColor);
             let allMatch = true;
-            
-            const checkX = Math.max(0, startX);
-            const checkY = Math.max(0, startY);
-            const checkW = Math.min(startX + currentSize, SIZE) - checkX;
-            const checkH = Math.min(startY + currentSize, SIZE) - checkY;
+            let activeOffsets = [];
 
-            if (checkW > 0 && checkH > 0) {
-                const imgData = offCtx.getImageData(checkX, checkY, checkW, checkH).data;
-                for (let i = 0; i < imgData.length; i += 4) {
-                    if (imgData[i] !== targetRgb.r || imgData[i+1] !== targetRgb.g || imgData[i+2] !== targetRgb.b) {
-                        allMatch = false;
-                        break;
+            // Récupère la forme du pinceau actif
+            if (brushMode === 'custom') {
+                for (let i = 0; i < 100; i++) {
+                    if (customBrush[i]) activeOffsets.push(i);
+                }
+                if (activeOffsets.length === 0) return; // Ignore si le custom brush est vide
+            }
+
+            // OPTIMISATION : Ne pas envoyer si la toile a déjà la couleur exacte sous chaque pixel de la forme
+            if (brushMode === 'normal') {
+                if (bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
+                    const p = offCtx.getImageData(bx, by, 1, 1).data;
+                    if (p[0] !== targetRgb.r || p[1] !== targetRgb.g || p[2] !== targetRgb.b) allMatch = false;
+                }
+            } else {
+                for (const idx of activeOffsets) {
+                    const dx = (idx % 10) - 5;
+                    const dy = Math.floor(idx / 10) - 5;
+                    const px = bx + dx;
+                    const py = by + dy;
+                    if (px >= 0 && px < SIZE && py >= 0 && py < SIZE) {
+                        const p = offCtx.getImageData(px, py, 1, 1).data;
+                        if (p[0] !== targetRgb.r || p[1] !== targetRgb.g || p[2] !== targetRgb.b) {
+                            allMatch = false; break;
+                        }
                     }
                 }
             }
 
+            const shapeStr = brushMode === 'custom' ? JSON.stringify(activeOffsets) : null;
+
             if (allMatch) {
-                // Si la toile a déjà cette couleur, on nettoie d'éventuels ordres en attente contradictoires
                 const lenBefore = pendingQueue.length;
-                pendingQueue = pendingQueue.filter(p => !(p.x === startX && p.y === startY && p.size === currentSize));
+                pendingQueue = pendingQueue.filter(p => !(p.x === bx && p.y === by && p.shapeStr === shapeStr));
                 if (pendingQueue.length !== lenBefore) {
-                    draw();
-                    updateProgressBar();
+                    draw(); updateProgressBar();
                 }
                 return;
             }
-            // ----------------------------------------------------------------------
 
-            const existing = pendingQueue.find(p => p.x === startX && p.y === startY && p.size === currentSize);
-            
+            const existing = pendingQueue.find(p => p.x === bx && p.y === by && p.shapeStr === shapeStr);
             if (existing) {
                 existing.color = currentColor;
                 existing.retries = 0;
             } else {
-                pendingQueue.push({ x: startX, y: startY, color: currentColor, size: currentSize, retries: 0 });
-                totalPendingBatch++; // On augmente la taille totale du lot
+                pendingQueue.push({ 
+                    x: bx, y: by, color: currentColor, 
+                    shapeStr: shapeStr, 
+                    shape: brushMode === 'custom' ? activeOffsets : null,
+                    retries: 0 
+                });
+                totalPendingBatch++;
             }
+            
             draw();
             updateProgressBar();
         }
@@ -684,11 +833,18 @@ const FRONTEND_HTML = `
                     if (p.retries > 20) {
                         pendingQueue.shift();
                         draw();
-                        updateProgressBar(); // Mise à jour si on abandonne un point
+                        updateProgressBar(); 
                         return;
                     }
 
-                    ws.send(JSON.stringify({ type: 'pixel', x: p.x, y: p.y, color: p.color, size: p.size }));
+                    // Envoi léger au serveur
+                    ws.send(JSON.stringify({ 
+                        type: 'pixel', 
+                        x: p.x, y: p.y, 
+                        color: p.color, 
+                        shape: p.shape 
+                    }));
+                    
                     lastSendTime = now;
                 }
             }
