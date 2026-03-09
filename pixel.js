@@ -29,7 +29,7 @@ try {
         console.log(`[INIT] Plateau chargé depuis ${BOARD_FILE}`);
     } else {
         board = Buffer.alloc(BOARD_SIZE);
-        board.fill(26); // Remplit avec la couleur #1a1a1a (26 en décimal) par défaut (fond sombre)
+        board.fill(26); // Remplit avec la couleur #1a1a1a par défaut
         console.log('[INIT] Nouveau plateau sombre créé.');
     }
 } catch (err) {
@@ -44,7 +44,7 @@ setInterval(() => {
     });
 }, 60000);
 
-// Nettoyage de la map des cooldowns toutes les minutes (Anti fuite de mémoire)
+// Nettoyage de la map des cooldowns toutes les minutes
 setInterval(() => {
     const now = Date.now();
     for (const [ip, time] of cooldowns.entries()) {
@@ -90,7 +90,7 @@ const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws, req) => {
     const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
-    ws.clientId = Math.random().toString(36).substring(2, 9); // ID unique par connexion
+    ws.clientId = Math.random().toString(36).substring(2, 9); 
 
     const sendOnlineCount = () => {
         const msg = JSON.stringify({ type: 'stats', online: wss.clients.size });
@@ -101,15 +101,14 @@ wss.on('connection', (ws, req) => {
     sendOnlineCount();
 
     ws.on('message', (message) => {
-        // La limite passe à 1024 pour permettre l'envoi de la matrice Custom 10x10 sans bloquer
         if (message.length > 1024) return ws.close(1009, 'Message trop lourd');
 
         try {
             const data = JSON.parse(message);
             
-            // Gestion de l'affichage en temps réel des curseurs
+            // Relais de la position et du pseudo (emoji)
             if (data.type === 'cursor') {
-                const broadcastMsg = JSON.stringify({ type: 'cursor', id: ws.clientId, x: data.x, y: data.y });
+                const broadcastMsg = JSON.stringify({ type: 'cursor', id: ws.clientId, x: data.x, y: data.y, emoji: data.emoji });
                 wss.clients.forEach(client => {
                     if (client !== ws && client.readyState === ws.OPEN) client.send(broadcastMsg);
                 });
@@ -120,7 +119,6 @@ wss.on('connection', (ws, req) => {
                 const now = Date.now();
                 const lastAction = cooldowns.get(ip) || 0;
 
-                // Vérification anti-spam
                 if (now - lastAction < COOLDOWN_MS) {
                     return ws.send(JSON.stringify({ type: 'error', msg: 'Veuillez patienter.' }));
                 }
@@ -135,14 +133,12 @@ wss.on('connection', (ws, req) => {
 
                 const { r, g, b } = hexToRgb(color);
                 
-                // Application serveur
                 if (shape && Array.isArray(shape)) {
-                    if (shape.length > 100) return; // Sécurité
+                    if (shape.length > 100) return; 
                     for (let i = 0; i < shape.length; i++) {
                         const idx = parseInt(shape[i]);
                         if (isNaN(idx) || idx < 0 || idx > 99) continue;
                         
-                        // Calcul de la position par rapport au centre (5,5) de la matrice 10x10
                         const dx = (idx % 10) - 5;
                         const dy = Math.floor(idx / 10) - 5;
                         const px = x + dx;
@@ -156,7 +152,6 @@ wss.on('connection', (ws, req) => {
                         }
                     }
                 } else {
-                    // Pinceau normal 1x1
                     if (x >= 0 && x < BOARD_WIDTH && y >= 0 && y < BOARD_HEIGHT) {
                         const boardIdx = (y * BOARD_WIDTH + x) * 3;
                         board[boardIdx] = r;
@@ -176,7 +171,6 @@ wss.on('connection', (ws, req) => {
     });
 
     ws.on('close', () => {
-        // Informe tout le monde que le curseur a disparu
         const removeMsg = JSON.stringify({ type: 'cursor_remove', id: ws.clientId });
         wss.clients.forEach(client => {
             if (client.readyState === ws.OPEN) client.send(removeMsg);
@@ -199,7 +193,6 @@ const FRONTEND_HTML = `
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Pixel - florianscher.fr</title>
-    <!-- Importation de la roue chromatique iro.js -->
     <script src="https://cdn.jsdelivr.net/npm/@jaames/iro@5"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; user-select: none; touch-action: none; }
@@ -209,46 +202,47 @@ const FRONTEND_HTML = `
         #canvas-wrapper { flex: 1; position: relative; overflow: hidden; background: #1a1a1a; cursor: crosshair; }
         canvas { display: block; touch-action: none; width: 100%; height: 100%; }
         
+        /* HUD réorganisé pour s'adapter au mobile (Scroll horizontal invisible) */
         #hud { 
-            background: #1e1e1e; border-top: 1px solid #333; padding: 12px 20px; 
-            display: flex; justify-content: center; align-items: center; 
-            flex-wrap: wrap; gap: 20px; z-index: 20; box-shadow: 0 -5px 20px rgba(0,0,0,0.5);
+            background: #1e1e1e; border-top: 1px solid #333; padding: 12px 15px; 
+            display: flex; justify-content: flex-start; align-items: center; 
+            flex-wrap: nowrap; gap: 10px; z-index: 20; box-shadow: 0 -5px 20px rgba(0,0,0,0.5);
+            overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
         }
+        #hud::-webkit-scrollbar { display: none; }
 
-        .hud-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+        .hud-group { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
-        .tool-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 50%; width: 45px; height: 45px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; transition: all 0.2s; outline: none; padding: 0; }
+        /* Nouveaux boutons rectangulaires */
+        .tool-btn { 
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); 
+            color: white; border-radius: 8px; padding: 0 16px; height: 38px; 
+            cursor: pointer; display: flex; align-items: center; justify-content: center; 
+            font-size: 14px; font-weight: bold; transition: all 0.2s; outline: none; flex-shrink: 0;
+        }
         .tool-btn:hover { background: rgba(255,255,255,0.2); }
         .tool-btn.active { background: rgba(76, 175, 80, 0.5); border-color: #4caf50; box-shadow: 0 0 10px rgba(76, 175, 80, 0.5); }
-        .tool-btn-txt { font-size: 14px; font-weight: bold; }
         
-        .icon-btn { font-size: 18px; cursor: pointer; transition: transform 0.1s; display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; color: white;}
-        .icon-btn:hover { transform: scale(1.2); }
-        #zoomSlider { cursor: pointer; width: 100px; accent-color: #4caf50; }
+        /* Indicateur de couleur */
+        #color-btn-indicator { width: 38px; height: 38px; border-radius: 8px; border: 2px solid rgba(255,255,255,0.5); cursor: pointer; box-shadow: 0 0 10px rgba(0,0,0,0.3); transition: transform 0.1s; flex-shrink: 0; }
+        #color-btn-indicator:hover { transform: scale(1.05); border-color: white; }
 
-        #color-btn-indicator { width: 45px; height: 45px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.5); cursor: pointer; box-shadow: 0 0 10px rgba(0,0,0,0.3); transition: transform 0.1s; }
-        #color-btn-indicator:hover { transform: scale(1.1); border-color: white; }
-
-        #colorPanel { display: none; position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%); background: rgba(20, 20, 20, 0.95); padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(15px); flex-direction: column; align-items: center; gap: 15px; box-shadow: 0 15px 40px rgba(0,0,0,0.8); z-index: 10; }
+        #colorPanel { display: none; position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); background: rgba(20, 20, 20, 0.95); padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(15px); flex-direction: column; align-items: center; gap: 15px; box-shadow: 0 15px 40px rgba(0,0,0,0.8); z-index: 10; }
         #hexInput { width: 90px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 16px; font-weight: bold; text-transform: uppercase; outline: none; border-radius: 8px; padding: 8px; text-align: center; }
 
-        /* Editeur 10x10 Custom Brush avec effet d'agrandissement */
-        #brushEditorContainer { display: none; background: #222; padding: 6px; border-radius: 8px; border: 1px solid #444; }
-        #brushEditorWrapper { width: 60px; height: 60px; position: relative; }
+        /* Editeur Custom Brush */
+        #brushEditorContainer { display: none; background: #222; padding: 6px; border-radius: 8px; border: 1px solid #444; flex-shrink: 0; }
+        #brushEditorWrapper { width: 45px; height: 45px; position: relative; }
         #brushEditor { 
             position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
             display: grid; grid-template-columns: repeat(10, 1fr); 
-            width: 60px; height: 60px; background: #ccc; gap: 1px; border: 1px solid #555; 
-            cursor: crosshair; touch-action: none; 
-            transition: width 0.2s ease, height 0.2s ease;
+            width: 45px; height: 45px; background: #ccc; gap: 1px; border: 1px solid #555; 
+            cursor: crosshair; touch-action: none; transition: width 0.2s ease, height 0.2s ease;
         }
         #brushEditorContainer:hover #brushEditor,
         #brushEditor.expanded {
-            width: 180px; height: 180px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
-            border: 2px solid #888;
-            border-radius: 4px;
-            z-index: 50;
+            width: 180px; height: 180px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+            border: 2px solid #888; border-radius: 4px; z-index: 50;
         }
         .brush-cell { background: white; width: 100%; height: 100%; user-select: none; }
         .brush-cell.active { background: black; }
@@ -266,41 +260,30 @@ const FRONTEND_HTML = `
             background: rgba(20, 20, 20, 0.9); padding: 12px 20px; border-radius: 15px;
             border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(15px);
             display: flex; flex-direction: column; gap: 8px; width: 280px; z-index: 30;
-            box-shadow: 0 15px 40px rgba(0,0,0,0.6);
-            opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.6); opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
         }
         #progress-container.show { opacity: 1; }
         .progress-info { display: flex; justify-content: space-between; color: white; font-size: 13px; font-weight: bold; }
         .progress-bar-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
         #progress-bar-fill { height: 100%; width: 0%; background: #4caf50; transition: width 0.1s linear; }
 
-        /* --- RESPONSIVE MOBILE --- */
+        /* RESPONSIVE MOBILE */
         @media (max-width: 768px) {
-            #hud { padding: 8px 10px; gap: 10px; }
-            .tool-btn { width: 40px; height: 40px; font-size: 18px; }
-            .tool-btn-txt { font-size: 12px; }
-            #color-btn-indicator { width: 40px; height: 40px; }
-            
-            /* Cacher le slider de zoom car on implémente le pinch-to-zoom */
-            #zoomSlider { display: none; } 
-            
-            /* Optimisation du bloc d'infos du haut */
             #top-info { top: 10px; right: 10px; left: 10px; padding: 6px 12px; font-size: 11px; justify-content: space-between; }
             #status { border: none; padding-left: 0; }
+            .hide-mobile { display: none !important; }
         }
     </style>
 </head>
 <body>
     <div id="app">
         
-        <!-- Bloc d'infos centralisé en haut -->
         <div id="top-info">
             <span class="info-segment coords">X:<span id="valX">0</span> Y:<span id="valY">0</span></span>
             <span class="info-segment"><span class="online-dot">●</span> <span id="onlineCount">1</span> <span class="hide-mobile">en ligne</span></span>
             <span class="info-segment" id="status">Connexion...</span>
         </div>
 
-        <!-- Jauge d'envoi dynamique -->
         <div id="progress-container">
             <div class="progress-info">
                 <span id="progress-text">0%</span>
@@ -320,31 +303,27 @@ const FRONTEND_HTML = `
             </div>
         </div>
 
+        <!-- HUD principal horizontal -->
         <div id="hud">
-            <!-- Boutons de zoom (slider masqué sur mobile) -->
-            <div class="hud-group hide-mobile">
-                <span class="icon-btn" id="zoomOutBtn" title="Dézoom max">➖</span>
-                <input type="range" id="zoomSlider" min="0.1" max="30" step="0.1" value="1">
-                <span class="icon-btn" id="zoomInBtn" title="Zoom max">➕</span>
-            </div>
-
-            <!-- Outils principaux -->
             <div class="hud-group">
-                <button id="btnBrushNormal" class="tool-btn tool-btn-txt active" title="Pinceau 1x1">1x1</button>
-                <button id="btnBrushCustom" class="tool-btn" title="Pinceau Personnalisé">🖌️</button>
-                <button id="btnEraser" class="tool-btn" title="Gomme">🧼</button>
+                <button id="btnBrushNormal" class="tool-btn active">1x1</button>
+                <button id="btnBrushCustom" class="tool-btn">Custom</button>
                 
-                <!-- Editeur de pinceau custom -->
                 <div id="brushEditorContainer">
                     <div id="brushEditorWrapper">
                         <div id="brushEditor"></div>
                     </div>
                 </div>
 
-                <div id="color-btn-indicator" style="background-color: #ff0000;" title="Choisir une couleur"></div>
-                <button id="btnPipette" class="tool-btn" title="Pipette">💧</button>
-                <button id="btnCursors" class="tool-btn" title="Afficher les joueurs">📡</button>
-                <button id="exportBtn" class="tool-btn" title="Exporter en PNG">💾</button>
+                <button id="btnEraser" class="tool-btn">Gomme</button>
+                <div id="color-btn-indicator" style="background-color: #ff0000;"></div>
+                <button id="btnPipette" class="tool-btn">Pipette</button>
+            </div>
+
+            <div class="hud-group">
+                <button id="btnPseudo" class="tool-btn">Pseudo: 👽</button>
+                <button id="btnCursors" class="tool-btn">Joueurs</button>
+                <button id="exportBtn" class="tool-btn">Exporter</button>
             </div>
         </div>
     </div>
@@ -362,28 +341,24 @@ const FRONTEND_HTML = `
 
         const btnPipette = document.getElementById('btnPipette');
         const btnCursors = document.getElementById('btnCursors');
+        const btnPseudo = document.getElementById('btnPseudo');
         const colorBtnIndicator = document.getElementById('color-btn-indicator');
         const colorPanel = document.getElementById('colorPanel');
         const hexInput = document.getElementById('hexInput');
         
-        const zoomSlider = document.getElementById('zoomSlider');
-        const zoomOutBtn = document.getElementById('zoomOutBtn');
-        const zoomInBtn = document.getElementById('zoomInBtn');
-
         const statusEl = document.getElementById('status');
         const valX = document.getElementById('valX');
         const valY = document.getElementById('valY');
         const onlineCount = document.getElementById('onlineCount');
         const exportBtn = document.getElementById('exportBtn');
 
-        // Variables Jauge de Progression
         const progressContainer = document.getElementById('progress-container');
         const progressBarFill = document.getElementById('progress-bar-fill');
         const progressText = document.getElementById('progress-text');
         const progressRemaining = document.getElementById('progress-remaining');
 
         const SIZE = 1000;
-        const DEFAULT_BG_COLOR = '#1a1a1a';
+        const DEFAULT_BG_COLOR = '#ffffff'; // La gomme applique désormais du blanc
         let scale = 1;
         let offsetX = 0;
         let offsetY = 0;
@@ -394,19 +369,21 @@ const FRONTEND_HTML = `
         offCanvas.height = SIZE;
         const offCtx = offCanvas.getContext('2d', { alpha: false });
 
+        // États des contrôles
         let isPanning = false;
         let isPainting = false;
         let isMoved = false;
         let lastMouseX = 0;
         let lastMouseY = 0;
         
-        // Variables pour Pinch-To-Zoom (Mobile)
+        // Tactile
         let isPinching = false;
         let lastPinchDist = null;
 
-        let currentTool = 'brush'; // 'brush', 'eraser' or 'pipette'
-        let brushMode = 'normal'; // 'normal' or 'custom'
+        let currentTool = 'brush'; 
+        let brushMode = 'normal'; 
         let currentColor = '#ff0000';
+        let myEmoji = '👽';
         
         let pendingQueue = []; 
         let lastSendTime = 0;
@@ -416,10 +393,20 @@ const FRONTEND_HTML = `
         let totalPendingBatch = 0;
         let progressHideTimeout;
 
-        // Variables pour les curseurs des autres joueurs
+        // Joueurs
         let showCursors = false;
-        const otherCursors = new Map(); // id -> {x, y, time}
+        const otherCursors = new Map(); 
         let lastCursorSendTime = 0;
+
+        // --- GESTION DU PSEUDO ---
+        btnPseudo.addEventListener('click', () => {
+            const input = prompt("Entrez un emoji pour représenter votre joueur :", myEmoji);
+            if (input && input.trim() !== '') {
+                // Array.from garantit l'extraction correcte d'un emoji complexe (surrogate pairs)
+                myEmoji = Array.from(input.trim())[0];
+                btnPseudo.innerText = "Pseudo: " + myEmoji;
+            }
+        });
 
         // --- GESTION DE L'EDITEUR DE PINCEAU (10x10) ---
         const customBrush = Array(100).fill(false);
@@ -493,7 +480,6 @@ const FRONTEND_HTML = `
             handleBrushEditorInteraction(e, true);
         }, {passive: false});
         brushEditor.addEventListener('touchend', () => { isEditingBrush = false; });
-
 
         // --- GESTION DES COULEURS ---
         var colorPicker = new iro.ColorPicker("#colorPickerWheel", {
@@ -584,7 +570,6 @@ const FRONTEND_HTML = `
 
         canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-
         // --- GESTION DE LA JAUGE ---
         function updateProgressBar() {
             if (pendingQueue.length === 0) {
@@ -627,22 +612,8 @@ const FRONTEND_HTML = `
             offsetX = targetX - (targetX - offsetX) * actualZoomFactor;
             offsetY = targetY - (targetY - offsetY) * actualZoomFactor;
             scale = newScale;
-            
-            zoomSlider.value = scale;
             draw();
         }
-
-        zoomSlider.addEventListener('input', (e) => applyZoom(parseFloat(e.target.value), true));
-        zoomOutBtn.addEventListener('click', () => applyZoom(0.1, true));
-        zoomInBtn.addEventListener('click', () => applyZoom(30, true));
-
-        canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            const zoomSpeed = 0.002;
-            const zoomFactor = Math.exp(e.deltaY * -zoomSpeed);
-            const pos = getEventData(e);
-            applyZoom(scale * zoomFactor, false, pos.canvasX, pos.canvasY);
-        }, {passive: false});
 
         // --- NAVIGATION ET DESSIN ---
         function resize() {
@@ -652,7 +623,6 @@ const FRONTEND_HTML = `
                 scale = Math.min(canvas.width / SIZE, canvas.height / SIZE) * 0.9;
                 offsetX = (canvas.width - (SIZE * scale)) / 2;
                 offsetY = (canvas.height - (SIZE * scale)) / 2;
-                zoomSlider.value = scale;
             }
             draw();
         }
@@ -683,6 +653,15 @@ const FRONTEND_HTML = `
             }
         }
 
+        function emitCursorPosition() {
+            const now = Date.now();
+            if (now - lastCursorSendTime > 100 && ws && ws.readyState === WebSocket.OPEN && hoverX >= 0) {
+                ws.send(JSON.stringify({ type: 'cursor', x: hoverX, y: hoverY, emoji: myEmoji }));
+                lastCursorSendTime = now;
+            }
+        }
+
+        // Souris
         canvas.addEventListener('mousedown', (e) => {
             const pos = getEventData(e);
             lastMouseX = pos.screenX; lastMouseY = pos.screenY;
@@ -692,27 +671,38 @@ const FRONTEND_HTML = `
             else if (e.button === 0) {
                 isPainting = true;
                 triggerTool(pos.canvasX, pos.canvasY);
+                emitCursorPosition();
             }
         });
 
+        // Tactile
         canvas.addEventListener('touchstart', (e) => {
-            // Logique de Pinch-To-Zoom tactile
+            e.preventDefault(); // Empêche le défilement de la page sur mobile
+            
             if (e.touches.length === 2) {
+                // 2 Doigts : Pan + Pinch
                 isPinching = true;
-                isPanning = false;
+                isPanning = true;
                 isPainting = false;
                 lastPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
-                return;
+                lastMouseX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                lastMouseY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+            } else if (e.touches.length === 1) {
+                // 1 Doigt : Dessiner
+                isPinching = false;
+                isPanning = false;
+                isPainting = true; 
+                isMoved = false;
+                const pos = getEventData(e);
+                lastMouseX = pos.screenX; lastMouseY = pos.screenY;
+                triggerTool(pos.canvasX, pos.canvasY);
+                emitCursorPosition();
             }
-
-            const pos = getEventData(e);
-            lastMouseX = pos.screenX; lastMouseY = pos.screenY;
-            isMoved = false;
-            isPanning = true; 
         }, {passive: false});
 
         function handleMove(e) {
             if (isPinching && e.touches && e.touches.length === 2) {
+                // Gestion du Pinch-to-Zoom et Pan simultanés
                 const currentDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
                 const zoomFactor = currentDist / lastPinchDist;
                 lastPinchDist = currentDist;
@@ -722,6 +712,12 @@ const FRONTEND_HTML = `
                 const rect = canvas.getBoundingClientRect();
                 
                 applyZoom(scale * zoomFactor, false, centerClientX - rect.left, centerClientY - rect.top);
+                
+                offsetX += centerClientX - lastMouseX;
+                offsetY += centerClientY - lastMouseY;
+                lastMouseX = centerClientX;
+                lastMouseY = centerClientY;
+                draw();
                 return;
             }
 
@@ -735,14 +731,7 @@ const FRONTEND_HTML = `
                     valY.innerText = by;
                     hoverX = bx;
                     hoverY = by;
-                    
-                    // Envoi de la position du curseur au serveur
-                    const now = Date.now();
-                    if (now - lastCursorSendTime > 100 && ws && ws.readyState === WebSocket.OPEN) {
-                        ws.send(JSON.stringify({ type: 'cursor', x: hoverX, y: hoverY }));
-                        lastCursorSendTime = now;
-                    }
-
+                    emitCursorPosition();
                 } else {
                     hoverX = -1; hoverY = -1;
                 }
@@ -763,22 +752,15 @@ const FRONTEND_HTML = `
         window.addEventListener('mousemove', handleMove);
         window.addEventListener('touchmove', handleMove, {passive: false});
 
-        window.addEventListener('mouseup', () => {
-            isPanning = false; isPainting = false;
-        });
-
-        canvas.addEventListener('mouseleave', () => {
-            hoverX = -1; hoverY = -1; draw();
-        });
+        window.addEventListener('mouseup', () => { isPanning = false; isPainting = false; });
+        canvas.addEventListener('mouseleave', () => { hoverX = -1; hoverY = -1; draw(); });
 
         window.addEventListener('touchend', (e) => {
             if (e.touches.length < 2) isPinching = false;
-            
-            if (isPanning && !isMoved && !isPinching && e.target === canvas) {
-                const pos = getEventData(e);
-                triggerTool(pos.canvasX, pos.canvasY);
+            if (e.touches.length === 0) {
+                isPanning = false; 
+                isPainting = false;
             }
-            isPanning = false; isPainting = false;
         });
 
         function pickColor(x, y) {
@@ -802,7 +784,6 @@ const FRONTEND_HTML = `
             ctx.imageSmoothingEnabled = false; 
             ctx.drawImage(offCanvas, 0, 0);
 
-            // Dessin des pixels en attente
             for (const p of pendingQueue) {
                 ctx.fillStyle = p.color;
                 if (p.shape) {
@@ -816,9 +797,8 @@ const FRONTEND_HTML = `
                 }
             }
 
-            // Prévisualisation du pinceau sous la souris
-            if (hoverX >= 0 && (currentTool === 'brush' || currentTool === 'eraser') && !isPanning) {
-                ctx.fillStyle = currentTool === 'eraser' ? 'rgba(255, 100, 100, 0.5)' : 'rgba(255, 255, 255, 0.5)';
+            if (hoverX >= 0 && (currentTool === 'brush' || currentTool === 'eraser') && !isPanning && !isPinching) {
+                ctx.fillStyle = currentTool === 'eraser' ? 'rgba(255, 255, 255, 0.8)' : 'rgba(255, 255, 255, 0.5)';
                 if (brushMode === 'custom') {
                     for (let i = 0; i < 100; i++) {
                         if (customBrush[i]) {
@@ -834,28 +814,25 @@ const FRONTEND_HTML = `
             
             ctx.restore();
 
-            // Affichage des curseurs des autres joueurs par-dessus le reste
+            // Affichage des Emojis (Curseurs)
             if (showCursors) {
                 const now = Date.now();
+                // Assure que l'emoji est suffisamment grand même si la carte est très dézoomée
+                ctx.font = Math.max(20, scale * 2) + "px Arial";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+
                 for (const [id, c] of otherCursors.entries()) {
                     if (now - c.time > 10000) { 
-                        otherCursors.delete(id); // Supprime si inactif > 10s
+                        otherCursors.delete(id); 
                         continue;
                     }
                     
-                    // Calcul des coordonnées à l'écran, peu importe le zoom
                     const screenX = c.x * scale + offsetX + scale/2;
                     const screenY = c.y * scale + offsetY + scale/2;
 
-                    ctx.beginPath();
-                    // Le rayon reste constant, garantissant la visibilité (min 6px de rayon)
-                    const radius = Math.max(6, scale * 0.4); 
-                    ctx.arc(screenX, screenY, radius, 0, 2*Math.PI);
-                    ctx.fillStyle = 'rgba(244, 67, 54, 0.8)'; // Rouge visible
-                    ctx.fill();
-                    ctx.lineWidth = 2;
-                    ctx.strokeStyle = '#fff';
-                    ctx.stroke();
+                    // Affiche l'emoji reçu ou l'emoji extraterrestre par défaut
+                    ctx.fillText(c.emoji || '👽', screenX, screenY);
                 }
             }
         }
@@ -870,7 +847,7 @@ const FRONTEND_HTML = `
                 const data = JSON.parse(event.data);
                 
                 if (data.type === 'cursor') {
-                    otherCursors.set(data.id, { x: data.x, y: data.y, time: Date.now() });
+                    otherCursors.set(data.id, { x: data.x, y: data.y, emoji: data.emoji, time: Date.now() });
                     if (showCursors) draw();
                 } else if (data.type === 'cursor_remove') {
                     otherCursors.delete(data.id);
@@ -912,7 +889,6 @@ const FRONTEND_HTML = `
             if (pendingQueue.length > 500) return;
             if (pendingQueue.length === 0) totalPendingBatch = 0;
 
-            // La gomme applique la couleur de fond (#1a1a1a)
             const colorToUse = currentTool === 'eraser' ? DEFAULT_BG_COLOR : currentColor;
             const targetRgb = hexToRgbClient(colorToUse);
             let filteredOffsets = null; 
@@ -921,7 +897,7 @@ const FRONTEND_HTML = `
                 if (bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
                     const p = offCtx.getImageData(bx, by, 1, 1).data;
                     if (p[0] === targetRgb.r && p[1] === targetRgb.g && p[2] === targetRgb.b) {
-                        return; // Déjà de la bonne couleur
+                        return; 
                     }
                 } else {
                     return; 
