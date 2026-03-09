@@ -175,8 +175,6 @@ const FRONTEND_HTML = `
         .info-label { font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
         .info-value { font-size: 16px; font-weight: bold; }
         
-        #cooldown-bar { position: absolute; bottom: 0; left: 0; height: 4px; background: #4caf50; width: 0%; border-radius: 0 0 40px 40px; transition: width 0.1s linear; }
-        
         #top-info { position: absolute; top: 15px; right: 15px; background: rgba(20, 20, 20, 0.85); padding: 8px 15px; border-radius: 20px; color: #fff; font-size: 13px; font-weight: bold; display: flex; gap: 15px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); pointer-events: none; }
         .online-dot { color: #4caf50; }
     </style>
@@ -203,7 +201,6 @@ const FRONTEND_HTML = `
             <span class="info-label">État</span>
             <span class="info-value" id="status">Connexion...</span>
         </div>
-        <div id="cooldown-bar"></div>
     </div>
 
     <script>
@@ -217,7 +214,6 @@ const FRONTEND_HTML = `
         const valX = document.getElementById('valX');
         const valY = document.getElementById('valY');
         const onlineCount = document.getElementById('onlineCount');
-        const cooldownBar = document.getElementById('cooldown-bar');
         const exportBtn = document.getElementById('exportBtn');
 
         const SIZE = 1000;
@@ -362,42 +358,38 @@ const FRONTEND_HTML = `
             const mouseX = e.clientX;
             const mouseY = e.clientY;
             
-            offsetX = mouseX - (mouseX - offsetX) * zoomFactor;
-            offsetY = mouseY - (mouseY - offsetY) * zoomFactor;
-            scale *= zoomFactor;
+            // Calculer le nouveau scale en le plafonnant
+            const newScale = Math.max(0.1, Math.min(scale * zoomFactor, 40)); 
             
-            // Limité à 30 pour éviter le bug d'écran noir (limite du navigateur à ~32767 pixels)
-            scale = Math.max(0.1, Math.min(scale, 30)); 
+            // Le VRAI facteur de zoom appliqué (évite que la caméra "glisse" quand on est à la limite du zoom)
+            const actualZoomFactor = newScale / scale;
+            
+            offsetX = mouseX - (mouseX - offsetX) * actualZoomFactor;
+            offsetY = mouseY - (mouseY - offsetY) * actualZoomFactor;
+            scale = newScale;
+            
             draw();
         }, {passive: false});
 
         function draw() {
             ctx.fillStyle = '#1a1a1a';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            offCtx.putImageData(imgData, 0, 0);
+            
+            // Utilisation de la transformation GPU native (plus performant et évite les bugs de limites de taille)
+            ctx.save();
+            ctx.translate(offsetX, offsetY);
+            ctx.scale(scale, scale);
+            
             ctx.imageSmoothingEnabled = false; 
-            ctx.drawImage(offCanvas, offsetX, offsetY, SIZE * scale, SIZE * scale);
+            ctx.drawImage(offCanvas, 0, 0);
 
-            // Dessiner les pixels en attente d'envoi (avec encadré blanc)
+            // Dessiner les pixels en attente (20% plus petits = 0.8 de largeur/hauteur, centrés avec +0.1)
             for (const p of pendingQueue) {
-                const pxX = offsetX + p.x * scale;
-                const pxY = offsetY + p.y * scale;
-                
                 ctx.fillStyle = p.color;
-                ctx.fillRect(pxX, pxY, scale, scale);
-                
-                // Encadré blanc
-                ctx.strokeStyle = '#FFFFFF';
-                ctx.lineWidth = scale > 5 ? 2 : 1;
-                ctx.strokeRect(pxX, pxY, scale, scale);
-                
-                // Petit contour intérieur noir pour une meilleure visibilité sur fond clair (quand zoomé)
-                if (scale > 5) {
-                    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-                    ctx.lineWidth = 1;
-                    ctx.strokeRect(pxX + 2, pxY + 2, scale - 4, scale - 4);
-                }
+                ctx.fillRect(p.x + 0.1, p.y + 0.1, 0.8, 0.8);
             }
+            
+            ctx.restore();
         }
 
         let ws;
@@ -476,14 +468,6 @@ const FRONTEND_HTML = `
                     }));
                     
                     lastSendTime = now;
-                    
-                    // Animation de la barre de progression pour indiquer le rythme d'envoi
-                    cooldownBar.style.transition = 'none';
-                    cooldownBar.style.width = '0%';
-                    setTimeout(() => {
-                        cooldownBar.style.transition = 'width 0.1s linear';
-                        cooldownBar.style.width = '100%';
-                    }, 10);
                 }
             }
         }, 10); // Vérification de la file très récurrente (passée à 10ms pour plus de réactivité)
@@ -508,7 +492,6 @@ const FRONTEND_HTML = `
                 isReady = true;
                 statusEl.innerText = "Prêt à peindre";
                 statusEl.style.color = "#4caf50";
-                cooldownBar.style.width = '100%';
                 
                 resize();
                 connectWebSocket();
