@@ -90,6 +90,7 @@ const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws, req) => {
     const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
+    ws.clientId = Math.random().toString(36).substring(2, 9); // ID unique par connexion
 
     const sendOnlineCount = () => {
         const msg = JSON.stringify({ type: 'stats', online: wss.clients.size });
@@ -106,6 +107,15 @@ wss.on('connection', (ws, req) => {
         try {
             const data = JSON.parse(message);
             
+            // Gestion de l'affichage en temps réel des curseurs
+            if (data.type === 'cursor') {
+                const broadcastMsg = JSON.stringify({ type: 'cursor', id: ws.clientId, x: data.x, y: data.y });
+                wss.clients.forEach(client => {
+                    if (client !== ws && client.readyState === ws.OPEN) client.send(broadcastMsg);
+                });
+                return;
+            }
+
             if (data.type === 'pixel') {
                 const now = Date.now();
                 const lastAction = cooldowns.get(ip) || 0;
@@ -118,7 +128,7 @@ wss.on('connection', (ws, req) => {
                 const x = Math.floor(data.x);
                 const y = Math.floor(data.y);
                 const color = data.color;
-                const shape = data.shape; // Matrice custom
+                const shape = data.shape;
 
                 if (isNaN(x) || isNaN(y) || x < -10 || x >= BOARD_WIDTH || y < -10 || y >= BOARD_HEIGHT) return;
                 if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
@@ -165,7 +175,14 @@ wss.on('connection', (ws, req) => {
         } catch (err) {}
     });
 
-    ws.on('close', sendOnlineCount);
+    ws.on('close', () => {
+        // Informe tout le monde que le curseur a disparu
+        const removeMsg = JSON.stringify({ type: 'cursor_remove', id: ws.clientId });
+        wss.clients.forEach(client => {
+            if (client.readyState === ws.OPEN) client.send(removeMsg);
+        });
+        sendOnlineCount();
+    });
 });
 
 server.listen(PORT, () => {
@@ -185,7 +202,7 @@ const FRONTEND_HTML = `
     <!-- Importation de la roue chromatique iro.js -->
     <script src="https://cdn.jsdelivr.net/npm/@jaames/iro@5"></script>
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; user-select: none; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; user-select: none; touch-action: none; }
         
         #app { display: flex; flex-direction: column; height: 100vh; width: 100vw; position: relative; }
         
@@ -195,10 +212,10 @@ const FRONTEND_HTML = `
         #hud { 
             background: #1e1e1e; border-top: 1px solid #333; padding: 12px 20px; 
             display: flex; justify-content: center; align-items: center; 
-            flex-wrap: wrap; gap: 25px; z-index: 20; box-shadow: 0 -5px 20px rgba(0,0,0,0.5);
+            flex-wrap: wrap; gap: 20px; z-index: 20; box-shadow: 0 -5px 20px rgba(0,0,0,0.5);
         }
 
-        .hud-group { display: flex; align-items: center; gap: 12px; }
+        .hud-group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
 
         .tool-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 50%; width: 45px; height: 45px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 20px; transition: all 0.2s; outline: none; padding: 0; }
         .tool-btn:hover { background: rgba(255,255,255,0.2); }
@@ -236,15 +253,16 @@ const FRONTEND_HTML = `
         .brush-cell { background: white; width: 100%; height: 100%; user-select: none; }
         .brush-cell.active { background: black; }
 
-        .info-group { color: #fff; font-size: 13px; font-weight: bold; background: rgba(0,0,0,0.3); padding: 8px 15px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.05); display: flex; gap: 15px; }
-        .info-group span { display: flex; align-items: center; gap: 5px; }
-        .coords { color: #aaa; width: 90px; }
+        /* Infos Top optimisées */
+        #top-info { position: absolute; top: 15px; right: 15px; background: rgba(20, 20, 20, 0.85); padding: 8px 15px; border-radius: 20px; color: #fff; font-size: 13px; font-weight: bold; display: flex; gap: 15px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); pointer-events: none; z-index: 10; }
+        .info-segment { display: flex; align-items: center; gap: 5px; }
+        .coords { color: #aaa; width: 85px; text-align: right; }
         .online-dot { color: #4caf50; font-size: 16px; }
         #status { color: #f44336; border-left: 1px solid #444; padding-left: 15px; }
 
         /* UI de la Barre de Progression Dynamique */
         #progress-container {
-            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
             background: rgba(20, 20, 20, 0.9); padding: 12px 20px; border-radius: 15px;
             border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(15px);
             display: flex; flex-direction: column; gap: 8px; width: 280px; z-index: 30;
@@ -255,11 +273,33 @@ const FRONTEND_HTML = `
         .progress-info { display: flex; justify-content: space-between; color: white; font-size: 13px; font-weight: bold; }
         .progress-bar-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
         #progress-bar-fill { height: 100%; width: 0%; background: #4caf50; transition: width 0.1s linear; }
+
+        /* --- RESPONSIVE MOBILE --- */
+        @media (max-width: 768px) {
+            #hud { padding: 8px 10px; gap: 10px; }
+            .tool-btn { width: 40px; height: 40px; font-size: 18px; }
+            .tool-btn-txt { font-size: 12px; }
+            #color-btn-indicator { width: 40px; height: 40px; }
+            
+            /* Cacher le slider de zoom car on implémente le pinch-to-zoom */
+            #zoomSlider { display: none; } 
+            
+            /* Optimisation du bloc d'infos du haut */
+            #top-info { top: 10px; right: 10px; left: 10px; padding: 6px 12px; font-size: 11px; justify-content: space-between; }
+            #status { border: none; padding-left: 0; }
+        }
     </style>
 </head>
 <body>
     <div id="app">
         
+        <!-- Bloc d'infos centralisé en haut -->
+        <div id="top-info">
+            <span class="info-segment coords">X:<span id="valX">0</span> Y:<span id="valY">0</span></span>
+            <span class="info-segment"><span class="online-dot">●</span> <span id="onlineCount">1</span> <span class="hide-mobile">en ligne</span></span>
+            <span class="info-segment" id="status">Connexion...</span>
+        </div>
+
         <!-- Jauge d'envoi dynamique -->
         <div id="progress-container">
             <div class="progress-info">
@@ -281,15 +321,18 @@ const FRONTEND_HTML = `
         </div>
 
         <div id="hud">
-            <div class="hud-group">
+            <!-- Boutons de zoom (slider masqué sur mobile) -->
+            <div class="hud-group hide-mobile">
                 <span class="icon-btn" id="zoomOutBtn" title="Dézoom max">➖</span>
                 <input type="range" id="zoomSlider" min="0.1" max="30" step="0.1" value="1">
                 <span class="icon-btn" id="zoomInBtn" title="Zoom max">➕</span>
             </div>
 
+            <!-- Outils principaux -->
             <div class="hud-group">
                 <button id="btnBrushNormal" class="tool-btn tool-btn-txt active" title="Pinceau 1x1">1x1</button>
                 <button id="btnBrushCustom" class="tool-btn" title="Pinceau Personnalisé">🖌️</button>
+                <button id="btnEraser" class="tool-btn" title="Gomme">🧼</button>
                 
                 <!-- Editeur de pinceau custom -->
                 <div id="brushEditorContainer">
@@ -298,15 +341,10 @@ const FRONTEND_HTML = `
                     </div>
                 </div>
 
-                <button id="btnPipette" class="tool-btn" title="Pipette">💧</button>
                 <div id="color-btn-indicator" style="background-color: #ff0000;" title="Choisir une couleur"></div>
-                <button id="exportBtn" class="tool-btn" title="Exporter la toile en PNG">💾</button>
-            </div>
-
-            <div class="hud-group info-group">
-                <span class="coords">X:<span id="valX">0</span> Y:<span id="valY">0</span></span>
-                <span><span class="online-dot">●</span> <span id="onlineCount">1</span> en ligne</span>
-                <span id="status">Connexion...</span>
+                <button id="btnPipette" class="tool-btn" title="Pipette">💧</button>
+                <button id="btnCursors" class="tool-btn" title="Afficher les joueurs">📡</button>
+                <button id="exportBtn" class="tool-btn" title="Exporter en PNG">💾</button>
             </div>
         </div>
     </div>
@@ -318,10 +356,12 @@ const FRONTEND_HTML = `
         
         const btnBrushNormal = document.getElementById('btnBrushNormal');
         const btnBrushCustom = document.getElementById('btnBrushCustom');
+        const btnEraser = document.getElementById('btnEraser');
         const brushEditorContainer = document.getElementById('brushEditorContainer');
         const brushEditor = document.getElementById('brushEditor');
 
         const btnPipette = document.getElementById('btnPipette');
+        const btnCursors = document.getElementById('btnCursors');
         const colorBtnIndicator = document.getElementById('color-btn-indicator');
         const colorPanel = document.getElementById('colorPanel');
         const hexInput = document.getElementById('hexInput');
@@ -343,6 +383,7 @@ const FRONTEND_HTML = `
         const progressRemaining = document.getElementById('progress-remaining');
 
         const SIZE = 1000;
+        const DEFAULT_BG_COLOR = '#1a1a1a';
         let scale = 1;
         let offsetX = 0;
         let offsetY = 0;
@@ -359,7 +400,11 @@ const FRONTEND_HTML = `
         let lastMouseX = 0;
         let lastMouseY = 0;
         
-        let currentTool = 'brush'; // 'brush' or 'pipette'
+        // Variables pour Pinch-To-Zoom (Mobile)
+        let isPinching = false;
+        let lastPinchDist = null;
+
+        let currentTool = 'brush'; // 'brush', 'eraser' or 'pipette'
         let brushMode = 'normal'; // 'normal' or 'custom'
         let currentColor = '#ff0000';
         
@@ -371,11 +416,14 @@ const FRONTEND_HTML = `
         let totalPendingBatch = 0;
         let progressHideTimeout;
 
+        // Variables pour les curseurs des autres joueurs
+        let showCursors = false;
+        const otherCursors = new Map(); // id -> {x, y, time}
+        let lastCursorSendTime = 0;
+
         // --- GESTION DE L'EDITEUR DE PINCEAU (10x10) ---
         const customBrush = Array(100).fill(false);
-        // Forme par défaut (petit carré de 2x2 au centre)
-        customBrush[44] = true; customBrush[45] = true;
-        customBrush[54] = true; customBrush[55] = true;
+        customBrush[44] = true; customBrush[45] = true; customBrush[54] = true; customBrush[55] = true;
 
         for(let i=0; i<100; i++) {
             const cell = document.createElement('div');
@@ -385,9 +433,8 @@ const FRONTEND_HTML = `
         }
 
         let isEditingBrush = false;
-        let brushPaintMode = true; // true = noir, false = blanc
+        let brushPaintMode = true; 
 
-        // Logique d'agrandissement (Desktop & Mobile)
         brushEditorContainer.addEventListener('mouseenter', () => brushEditor.classList.add('expanded'));
         brushEditorContainer.addEventListener('mouseleave', () => brushEditor.classList.remove('expanded'));
 
@@ -416,11 +463,10 @@ const FRONTEND_HTML = `
 
         brushEditor.addEventListener('mousedown', (e) => {
             if (!brushEditor.classList.contains('expanded')) brushEditor.classList.add('expanded');
-
             if(e.target.classList.contains('brush-cell')) {
                 isEditingBrush = true;
                 const idx = parseInt(e.target.dataset.index);
-                brushPaintMode = !customBrush[idx]; // Inverse la couleur du premier pixel touché
+                brushPaintMode = !customBrush[idx]; 
                 setBrushCell(idx, brushPaintMode);
             }
         });
@@ -429,13 +475,10 @@ const FRONTEND_HTML = `
 
         brushEditor.addEventListener('touchstart', (e) => {
             e.preventDefault();
-            
-            // Si le pinceau n'était pas agrandi, le premier tap ne fait que l'agrandir (sécurité)
             if (!brushEditor.classList.contains('expanded')) {
                 brushEditor.classList.add('expanded');
                 return; 
             }
-
             const touch = e.touches[0];
             const el = document.elementFromPoint(touch.clientX, touch.clientY);
             if (el && el.classList.contains('brush-cell')) {
@@ -499,11 +542,11 @@ const FRONTEND_HTML = `
             if (colorPanel.style.display === 'flex') colorPanel.style.display = 'none';
         });
 
-
         // --- GESTION DES OUTILS ---
         function setActiveTool(toolBtn) {
             btnBrushNormal.classList.remove('active');
             btnBrushCustom.classList.remove('active');
+            btnEraser.classList.remove('active');
             btnPipette.classList.remove('active');
             toolBtn.classList.add('active');
             wrapper.style.cursor = 'crosshair';
@@ -521,9 +564,22 @@ const FRONTEND_HTML = `
             brushEditorContainer.style.display = 'block'; 
         });
 
+        btnEraser.addEventListener('click', () => { 
+            currentTool = 'eraser'; 
+            setActiveTool(btnEraser); 
+            brushEditorContainer.style.display = brushMode === 'custom' ? 'block' : 'none'; 
+        });
+
         btnPipette.addEventListener('click', () => { 
             currentTool = 'pipette'; 
             setActiveTool(btnPipette); 
+            brushEditorContainer.style.display = 'none'; 
+        });
+
+        btnCursors.addEventListener('click', () => {
+            showCursors = !showCursors;
+            btnCursors.classList.toggle('active', showCursors);
+            draw();
         });
 
         canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -622,7 +678,7 @@ const FRONTEND_HTML = `
             const bx = Math.floor((cx - offsetX) / scale);
             const by = Math.floor((cy - offsetY) / scale);
             if(bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
-                if (currentTool === 'brush') placePixel(bx, by);
+                if (currentTool === 'brush' || currentTool === 'eraser') placePixel(bx, by);
                 else if (currentTool === 'pipette') pickColor(bx, by);
             }
         }
@@ -640,6 +696,15 @@ const FRONTEND_HTML = `
         });
 
         canvas.addEventListener('touchstart', (e) => {
+            // Logique de Pinch-To-Zoom tactile
+            if (e.touches.length === 2) {
+                isPinching = true;
+                isPanning = false;
+                isPainting = false;
+                lastPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                return;
+            }
+
             const pos = getEventData(e);
             lastMouseX = pos.screenX; lastMouseY = pos.screenY;
             isMoved = false;
@@ -647,6 +712,19 @@ const FRONTEND_HTML = `
         }, {passive: false});
 
         function handleMove(e) {
+            if (isPinching && e.touches && e.touches.length === 2) {
+                const currentDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+                const zoomFactor = currentDist / lastPinchDist;
+                lastPinchDist = currentDist;
+                
+                const centerClientX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                const centerClientY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                const rect = canvas.getBoundingClientRect();
+                
+                applyZoom(scale * zoomFactor, false, centerClientX - rect.left, centerClientY - rect.top);
+                return;
+            }
+
             const pos = getEventData(e);
             
             if (e.target === canvas) {
@@ -657,18 +735,25 @@ const FRONTEND_HTML = `
                     valY.innerText = by;
                     hoverX = bx;
                     hoverY = by;
+                    
+                    // Envoi de la position du curseur au serveur
+                    const now = Date.now();
+                    if (now - lastCursorSendTime > 100 && ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'cursor', x: hoverX, y: hoverY }));
+                        lastCursorSendTime = now;
+                    }
+
                 } else {
-                    hoverX = -1;
-                    hoverY = -1;
+                    hoverX = -1; hoverY = -1;
                 }
             }
 
-            if (isPanning) {
+            if (isPanning && !isPinching) {
                 isMoved = true;
                 offsetX += pos.screenX - lastMouseX;
                 offsetY += pos.screenY - lastMouseY;
                 draw();
-            } else if (isPainting && currentTool === 'brush') {
+            } else if (isPainting && (currentTool === 'brush' || currentTool === 'eraser')) {
                 triggerTool(pos.canvasX, pos.canvasY);
             }
             
@@ -687,7 +772,9 @@ const FRONTEND_HTML = `
         });
 
         window.addEventListener('touchend', (e) => {
-            if (isPanning && !isMoved && e.target === canvas) {
+            if (e.touches.length < 2) isPinching = false;
+            
+            if (isPanning && !isMoved && !isPinching && e.target === canvas) {
                 const pos = getEventData(e);
                 triggerTool(pos.canvasX, pos.canvasY);
             }
@@ -699,7 +786,6 @@ const FRONTEND_HTML = `
             const hex = "#" + (1 << 24 | p[0] << 16 | p[1] << 8 | p[2]).toString(16).padStart(6, '0').slice(-6);
             updateColor(hex);
             
-            // Retour au pinceau qui était sélectionné
             if (brushMode === 'normal') btnBrushNormal.click();
             else btnBrushCustom.click();
         }
@@ -716,7 +802,7 @@ const FRONTEND_HTML = `
             ctx.imageSmoothingEnabled = false; 
             ctx.drawImage(offCanvas, 0, 0);
 
-            // Dessin des pixels en attente (selon leur forme)
+            // Dessin des pixels en attente
             for (const p of pendingQueue) {
                 ctx.fillStyle = p.color;
                 if (p.shape) {
@@ -731,8 +817,8 @@ const FRONTEND_HTML = `
             }
 
             // Prévisualisation du pinceau sous la souris
-            if (hoverX >= 0 && currentTool === 'brush' && !isPanning) {
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            if (hoverX >= 0 && (currentTool === 'brush' || currentTool === 'eraser') && !isPanning) {
+                ctx.fillStyle = currentTool === 'eraser' ? 'rgba(255, 100, 100, 0.5)' : 'rgba(255, 255, 255, 0.5)';
                 if (brushMode === 'custom') {
                     for (let i = 0; i < 100; i++) {
                         if (customBrush[i]) {
@@ -747,6 +833,31 @@ const FRONTEND_HTML = `
             }
             
             ctx.restore();
+
+            // Affichage des curseurs des autres joueurs par-dessus le reste
+            if (showCursors) {
+                const now = Date.now();
+                for (const [id, c] of otherCursors.entries()) {
+                    if (now - c.time > 10000) { 
+                        otherCursors.delete(id); // Supprime si inactif > 10s
+                        continue;
+                    }
+                    
+                    // Calcul des coordonnées à l'écran, peu importe le zoom
+                    const screenX = c.x * scale + offsetX + scale/2;
+                    const screenY = c.y * scale + offsetY + scale/2;
+
+                    ctx.beginPath();
+                    // Le rayon reste constant, garantissant la visibilité (min 6px de rayon)
+                    const radius = Math.max(6, scale * 0.4); 
+                    ctx.arc(screenX, screenY, radius, 0, 2*Math.PI);
+                    ctx.fillStyle = 'rgba(244, 67, 54, 0.8)'; // Rouge visible
+                    ctx.fill();
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = '#fff';
+                    ctx.stroke();
+                }
+            }
         }
 
         // --- WEBSOCKET ET API ---
@@ -758,7 +869,13 @@ const FRONTEND_HTML = `
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 
-                if (data.type === 'pixel') {
+                if (data.type === 'cursor') {
+                    otherCursors.set(data.id, { x: data.x, y: data.y, time: Date.now() });
+                    if (showCursors) draw();
+                } else if (data.type === 'cursor_remove') {
+                    otherCursors.delete(data.id);
+                    if (showCursors) draw();
+                } else if (data.type === 'pixel') {
                     offCtx.fillStyle = data.color;
                     const shapeStr = data.shape ? JSON.stringify(data.shape) : null;
 
@@ -779,8 +896,6 @@ const FRONTEND_HTML = `
                         draw();
                         updateProgressBar();
                     }
-                } else if (data.type === 'error') {
-                    // Les erreurs réseau sont gérées via les retries asynchrones
                 } else if (data.type === 'stats') {
                     onlineCount.innerText = data.online;
                 }
@@ -797,21 +912,22 @@ const FRONTEND_HTML = `
             if (pendingQueue.length > 500) return;
             if (pendingQueue.length === 0) totalPendingBatch = 0;
 
-            const targetRgb = hexToRgbClient(currentColor);
-            let filteredOffsets = null; // null pour pinceau normal, tableau pour custom
+            // La gomme applique la couleur de fond (#1a1a1a)
+            const colorToUse = currentTool === 'eraser' ? DEFAULT_BG_COLOR : currentColor;
+            const targetRgb = hexToRgbClient(colorToUse);
+            let filteredOffsets = null; 
 
             if (brushMode === 'normal') {
                 if (bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
                     const p = offCtx.getImageData(bx, by, 1, 1).data;
                     if (p[0] === targetRgb.r && p[1] === targetRgb.g && p[2] === targetRgb.b) {
-                        return; // Déjà de la bonne couleur exacte
+                        return; // Déjà de la bonne couleur
                     }
                 } else {
-                    return; // Hors limites
+                    return; 
                 }
             } else {
                 filteredOffsets = [];
-                // Analyse chaque sous-pixel du pinceau personnalisé
                 for (let i = 0; i < 100; i++) {
                     if (customBrush[i]) {
                         const dx = (i % 10) - 5;
@@ -821,14 +937,12 @@ const FRONTEND_HTML = `
                         
                         if (px >= 0 && px < SIZE && py >= 0 && py < SIZE) {
                             const p = offCtx.getImageData(px, py, 1, 1).data;
-                            // Si la couleur est différente, on l'ajoute à la liste des pixels à envoyer
                             if (p[0] !== targetRgb.r || p[1] !== targetRgb.g || p[2] !== targetRgb.b) {
                                 filteredOffsets.push(i);
                             }
                         }
                     }
                 }
-                // Si la liste est vide, c'est que la forme chevauche intégralement la bonne couleur
                 if (filteredOffsets.length === 0) return; 
             }
 
@@ -836,11 +950,11 @@ const FRONTEND_HTML = `
 
             const existing = pendingQueue.find(p => p.x === bx && p.y === by && p.shapeStr === shapeStr);
             if (existing) {
-                existing.color = currentColor;
+                existing.color = colorToUse;
                 existing.retries = 0;
             } else {
                 pendingQueue.push({ 
-                    x: bx, y: by, color: currentColor, 
+                    x: bx, y: by, color: colorToUse, 
                     shapeStr: shapeStr, 
                     shape: filteredOffsets,
                     retries: 0 
@@ -866,7 +980,6 @@ const FRONTEND_HTML = `
                         return;
                     }
 
-                    // Envoi léger au serveur
                     ws.send(JSON.stringify({ 
                         type: 'pixel', 
                         x: p.x, y: p.y, 
