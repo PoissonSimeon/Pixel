@@ -983,10 +983,12 @@ const FRONTEND_HTML = `
                     for (const idx of item.shape) {
                         const dx = (idx % 10) - 5;
                         const dy = Math.floor(idx / 10) - 5;
-                        pendingState.set(`${item.x + dx},${item.y + dy}`, item.color);
+                        // CORRECTION : Concaténation classique au lieu des backticks
+                        pendingState.set((item.x + dx) + ',' + (item.y + dy), item.color);
                     }
                 } else {
-                    pendingState.set(`${item.x},${item.y}`, item.color);
+                    // CORRECTION : Concaténation classique
+                    pendingState.set(item.x + ',' + item.y, item.color);
                 }
             }
 
@@ -994,7 +996,8 @@ const FRONTEND_HTML = `
 
             if (brushMode === 'normal') {
                 if (bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
-                    const key = `${bx},${by}`;
+                    // CORRECTION : Concaténation classique
+                    const key = bx + ',' + by;
                     // Vérifie d'abord si c'est dans la file d'attente
                     if (pendingState.has(key)) {
                         if (pendingState.get(key) === colorToUse) return; 
@@ -1028,7 +1031,8 @@ const FRONTEND_HTML = `
                         const py = by + dy;
                         
                         if (px >= 0 && px < SIZE && py >= 0 && py < SIZE) {
-                            const key = `${px},${py}`;
+                            // CORRECTION : Concaténation classique
+                            const key = px + ',' + py;
                             
                             // 1. Est-ce que le pixel va déjà être repeint de la bonne couleur par la file d'attente ?
                             if (pendingState.has(key)) {
