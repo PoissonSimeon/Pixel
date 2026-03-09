@@ -191,25 +191,34 @@ const FRONTEND_HTML = `
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Pixel - florianscher.fr</title>
+    <!-- Module pour la roue chromatique -->
     <script src="https://cdn.jsdelivr.net/npm/@jaames/iro@5"></script>
+    <!-- Module pour TOUS les emojis natifs ! -->
+    <script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@1/index.js"></script>
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; user-select: none; touch-action: none; }
+        /* html, body avec height: 100% et overscroll-behavior previennent les comportements élastiques sur mobile */
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; user-select: none; touch-action: none; overscroll-behavior: none; }
         
-        #app { display: flex; flex-direction: column; height: 100vh; width: 100vw; position: relative; }
+        /* Utilisation de 100dvh (Dynamic Viewport Height) : Répare le bug du HUD caché par la barre du navigateur mobile */
+        #app { display: flex; flex-direction: column; height: 100dvh; width: 100vw; position: relative; }
         
         #canvas-wrapper { flex: 1; position: relative; overflow: hidden; background: #1a1a1a; cursor: crosshair; }
         canvas { display: block; touch-action: none; width: 100%; height: 100%; }
         
-        /* HUD réorganisé pour s'adapter au mobile (Scroll horizontal invisible) */
+        /* HUD centré, scrollable sur mobile si besoin */
         #hud { 
-            background: #1e1e1e; border-top: 1px solid #333; padding: 12px 15px; 
-            display: flex; justify-content: flex-start; align-items: center; 
-            flex-wrap: nowrap; gap: 10px; z-index: 20; box-shadow: 0 -5px 20px rgba(0,0,0,0.5);
+            background: #1e1e1e; border-top: 1px solid #333; padding: 12px 0; 
+            width: 100%; box-sizing: border-box;
             overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+            z-index: 20; box-shadow: 0 -5px 20px rgba(0,0,0,0.5);
         }
         #hud::-webkit-scrollbar { display: none; }
+        
+        .hud-inner {
+            display: flex; align-items: center; gap: 20px; margin: 0 auto; width: max-content; padding: 0 15px;
+        }
 
         .hud-group { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
@@ -231,7 +240,7 @@ const FRONTEND_HTML = `
         .icon-btn:hover { transform: scale(1.2); }
         #zoomSlider { cursor: pointer; width: 100px; accent-color: #4caf50; margin: 0 5px; }
 
-        /* Panneaux Flottants Multiples (Couleur, Pinceau, Emojis) */
+        /* Panneaux Flottants Multiples (Couleur, Pinceau) */
         .floating-panel {
             display: none; position: absolute; bottom: 80px; background: rgba(20, 20, 20, 0.95); 
             padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); 
@@ -241,17 +250,24 @@ const FRONTEND_HTML = `
         #colorPanel { left: 50%; transform: translateX(-50%); flex-direction: column; align-items: center; gap: 15px; }
         #hexInput { width: 90px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 16px; font-weight: bold; text-transform: uppercase; outline: none; border-radius: 8px; padding: 8px; text-align: center; }
 
-        /* Editeur Custom Brush repensé (Panneau flottant pour éviter le bug d'affichage derrière la toile) */
+        /* Editeur Custom Brush repensé */
         #brushPanel { left: 50%; transform: translateX(-50%); flex-direction: column; align-items: center; gap: 10px; }
         #brushEditor { display: grid; grid-template-columns: repeat(10, 1fr); width: 180px; height: 180px; background: #ccc; gap: 1px; border: 2px solid #555; cursor: crosshair; touch-action: none; border-radius: 4px; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); }
         .brush-cell { background: white; width: 100%; height: 100%; user-select: none; }
         .brush-cell.active { background: black; }
         .panel-title { color: white; font-size: 13px; font-weight: bold; }
 
-        /* Panneau Emojis */
-        #emojiPanel { right: 20px; display: none; grid-template-columns: repeat(5, 1fr); gap: 12px; padding: 15px; }
-        .emoji-btn { font-size: 26px; cursor: pointer; transition: transform 0.1s; user-select: none; text-align: center; }
-        .emoji-btn:hover { transform: scale(1.3); }
+        /* Sélecteur Emoji Natif Web Component */
+        emoji-picker {
+            display: none; position: absolute; bottom: 80px; right: 20px; z-index: 50;
+            --background: rgba(20, 20, 20, 0.95);
+            --border-color: rgba(255,255,255,0.1);
+            --input-border-color: rgba(255,255,255,0.2);
+            --text-color: #fff;
+            --button-hover-background: rgba(255,255,255,0.1);
+            --indicator-color: #4caf50;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.8); border-radius: 10px;
+        }
 
         /* Infos Top optimisées */
         #top-info { position: absolute; top: 15px; right: 15px; background: rgba(20, 20, 20, 0.85); padding: 8px 15px; border-radius: 20px; color: #fff; font-size: 13px; font-weight: bold; display: flex; gap: 15px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); pointer-events: none; z-index: 10; }
@@ -278,7 +294,9 @@ const FRONTEND_HTML = `
             #top-info { top: 10px; right: 10px; left: 10px; padding: 6px 12px; font-size: 11px; justify-content: space-between; }
             #status { border: none; padding-left: 0; }
             .hide-mobile { display: none !important; }
-            #emojiPanel { left: 50%; transform: translateX(-50%); right: auto; width: max-content; }
+            
+            /* L'emoji picker prend toute la place possible en bas au milieu */
+            emoji-picker { left: 50%; transform: translateX(-50%); right: auto; width: 95vw; max-width: 350px; }
         }
     </style>
 </head>
@@ -315,36 +333,34 @@ const FRONTEND_HTML = `
                 <div id="brushEditor"></div>
             </div>
 
-            <div id="emojiPanel" class="floating-panel">
-                <div class="emoji-btn">👽</div><div class="emoji-btn">👻</div><div class="emoji-btn">🤖</div><div class="emoji-btn">💩</div><div class="emoji-btn">🤡</div>
-                <div class="emoji-btn">👾</div><div class="emoji-btn">🐱</div><div class="emoji-btn">🐶</div><div class="emoji-btn">🦊</div><div class="emoji-btn">🐵</div>
-                <div class="emoji-btn">🐸</div><div class="emoji-btn">🐷</div><div class="emoji-btn">🐼</div><div class="emoji-btn">🐻</div><div class="emoji-btn">🦁</div>
-                <div class="emoji-btn">🐮</div><div class="emoji-btn">🦄</div><div class="emoji-btn">🐔</div><div class="emoji-btn">🐉</div><div class="emoji-btn">🦖</div>
-            </div>
+            <!-- Clavier d'Emojis Complet -->
+            <emoji-picker id="emojiPanel"></emoji-picker>
         </div>
 
-        <!-- HUD principal horizontal -->
+        <!-- HUD principal scrollable si besoin, avec un inner centré -->
         <div id="hud">
-            <div class="hud-group hide-mobile">
-                <span class="icon-btn" id="zoomOutBtn" title="Dézoom max">➖</span>
-                <input type="range" id="zoomSlider" min="0.1" max="30" step="0.1" value="1">
-                <span class="icon-btn" id="zoomInBtn" title="Zoom max">➕</span>
-            </div>
+            <div class="hud-inner">
+                <div class="hud-group hide-mobile">
+                    <span class="icon-btn" id="zoomOutBtn" title="Dézoom max">➖</span>
+                    <input type="range" id="zoomSlider" min="0.1" max="30" step="0.1" value="1">
+                    <span class="icon-btn" id="zoomInBtn" title="Zoom max">➕</span>
+                </div>
 
-            <div class="hud-group">
-                <button id="btnBrushNormal" class="tool-btn active">1x1</button>
-                <button id="btnBrushCustom" class="tool-btn">Custom</button>
-                <button id="btnEditBrush" class="tool-btn" style="display: none;">⚙️ Forme</button>
+                <div class="hud-group">
+                    <button id="btnBrushNormal" class="tool-btn active">1x1</button>
+                    <button id="btnBrushCustom" class="tool-btn">Custom</button>
+                    <button id="btnEditBrush" class="tool-btn" style="display: none;">Forme</button>
 
-                <button id="btnEraser" class="tool-btn">Gomme</button>
-                <div id="color-btn-indicator" style="background-color: #ff0000;"></div>
-                <button id="btnPipette" class="tool-btn">Pipette</button>
-            </div>
+                    <button id="btnEraser" class="tool-btn">Gomme</button>
+                    <div id="color-btn-indicator" style="background-color: #ff0000;"></div>
+                    <button id="btnPipette" class="tool-btn">Pipette</button>
+                </div>
 
-            <div class="hud-group">
-                <button id="btnPseudo" class="tool-btn">Pseudo: 👽</button>
-                <button id="btnCursors" class="tool-btn">Joueurs</button>
-                <button id="exportBtn" class="tool-btn">Exporter</button>
+                <div class="hud-group">
+                    <button id="btnPseudo" class="tool-btn">Pseudo: 👽</button>
+                    <button id="btnCursors" class="tool-btn">Joueurs</button>
+                    <button id="exportBtn" class="tool-btn">Exporter</button>
+                </div>
             </div>
         </div>
     </div>
@@ -365,7 +381,7 @@ const FRONTEND_HTML = `
         const btnPipette = document.getElementById('btnPipette');
         const btnCursors = document.getElementById('btnCursors');
         const btnPseudo = document.getElementById('btnPseudo');
-        const emojiPanel = document.getElementById('emojiPanel');
+        const emojiPanel = document.getElementById('emojiPanel'); // Composant Web <emoji-picker>
 
         const colorBtnIndicator = document.getElementById('color-btn-indicator');
         const colorPanel = document.getElementById('colorPanel');
@@ -434,19 +450,17 @@ const FRONTEND_HTML = `
             emojiPanel.style.display = 'none';
         }
 
-        // --- GESTION DU PSEUDO (CLAVIER EMOJI) ---
+        // --- GESTION DU PSEUDO (CLAVIER EMOJI COMPLET) ---
         btnPseudo.addEventListener('click', () => {
-            const isVisible = emojiPanel.style.display === 'grid';
+            const isVisible = emojiPanel.style.display === 'block'; // block est natif pour ce composant
             closeAllPanels();
-            if (!isVisible) emojiPanel.style.display = 'grid';
+            if (!isVisible) emojiPanel.style.display = 'block';
         });
 
-        document.querySelectorAll('.emoji-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                myEmoji = e.target.innerText;
-                btnPseudo.innerText = "Pseudo: " + myEmoji;
-                closeAllPanels();
-            });
+        emojiPanel.addEventListener('emoji-click', event => {
+            myEmoji = event.detail.unicode; // Récupère l'emoji sélectionné (gère toutes les couleurs de peau)
+            btnPseudo.innerText = "Pseudo: " + myEmoji;
+            closeAllPanels();
         });
 
         // --- GESTION DE L'EDITEUR DE PINCEAU (10x10) ---
@@ -613,7 +627,7 @@ const FRONTEND_HTML = `
 
         // Ferme les panneaux si on clique sur la toile
         canvas.addEventListener('mousedown', closeAllPanels);
-        canvas.addEventListener('touchstart', closeAllPanels, {passive: false});
+        canvas.addEventListener('touchstart', closeAllPanels, {passive: true});
 
         // --- GESTION DE LA JAUGE ---
         function updateProgressBar() {
@@ -737,7 +751,8 @@ const FRONTEND_HTML = `
 
         // Tactile
         canvas.addEventListener('touchstart', (e) => {
-            // L'événement preventDefault a été retiré ici pour permettre le closeAllPanels
+            // Empêcher uniquement si on est sur le canevas principal pour dessiner/zoomer
+            if (e.target === canvas) e.preventDefault();
             
             if (e.touches.length === 2) {
                 // 2 Doigts : Pan + Pinch
@@ -747,7 +762,7 @@ const FRONTEND_HTML = `
                 lastPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
                 lastMouseX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
                 lastMouseY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-            } else if (e.touches.length === 1) {
+            } else if (e.touches.length === 1 && e.target === canvas) {
                 // 1 Doigt : Dessiner
                 isPinching = false;
                 isPanning = false;
@@ -816,8 +831,8 @@ const FRONTEND_HTML = `
         canvas.addEventListener('mouseleave', () => { hoverX = -1; hoverY = -1; draw(); });
 
         window.addEventListener('touchend', (e) => {
-            if (e.touches.length < 2) isPinching = false;
-            if (e.touches.length === 0) {
+            if (e.touches && e.touches.length < 2) isPinching = false;
+            if (!e.touches || e.touches.length === 0) {
                 isPanning = false; 
                 isPainting = false;
             }
