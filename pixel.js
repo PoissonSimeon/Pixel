@@ -23,11 +23,11 @@ let board;
 const cooldowns = new Map(); // ip -> nextAllowedTime
 const energyMap = new Map(); // ip -> { tokens, lastUpdate }
 const activeIps = new Set(); // Sécurité : Stocke les IPs ayant prouvé qu'elles peuvent bouger un curseur
-const patternMap = new Map(); // NOUVEAU : Analyse les tracés ligne-par-ligne (ip -> { history, warnings })
+const patternMap = new Map(); // Analyse les tracés ligne-par-ligne (ip -> { history, warnings })
 
 // Paramètres de la Jauge d'Endurance affinés
 const MAX_ENERGY = 800;       
-const REGEN_PER_SEC = 10;     // Recharge ralentie pour étouffer les gros bots
+const REGEN_PER_SEC = 10;     
 
 // --- INITIALISATION DU PLATEAU ---
 try {
@@ -106,7 +106,7 @@ wss.on('connection', (ws, req) => {
     const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
     ws.clientId = Math.random().toString(36).substring(2, 9); 
     
-    // NOUVEAU : Création d'une clé de session secrète pour contrer les scripts "bêtes"
+    // Création d'une clé de session secrète pour contrer les scripts "bêtes"
     ws.sessionKey = Math.floor(Math.random() * 1000000);
     ws.send(JSON.stringify({ type: 'auth', key: ws.sessionKey }));
 
@@ -124,7 +124,6 @@ wss.on('connection', (ws, req) => {
         try {
             const data = JSON.parse(message);
             
-            // Relais de la position et Validation de la preuve d'humanité
             if (data.type === 'cursor') {
                 activeIps.add(ip); 
                 const broadcastMsg = JSON.stringify({ type: 'cursor', id: ws.clientId, x: data.x, y: data.y, emoji: data.emoji });
@@ -137,7 +136,7 @@ wss.on('connection', (ws, req) => {
             if (data.type === 'pixel') {
                 const now = Date.now();
 
-                // SÉCURITÉ 1 : Preuve d'humanité via le Token de Session
+                // Preuve d'humanité via le Token de Session
                 const expectedToken = (Math.floor(data.x) * 7) + (Math.floor(data.y) * 3) + ws.sessionKey;
                 if (data.token !== expectedToken) {
                     return ws.send(JSON.stringify({ type: 'error', msg: 'Client non officiel détecté.' }));
@@ -163,11 +162,10 @@ wss.on('connection', (ws, req) => {
                 const pixelCount = (shape && Array.isArray(shape)) ? shape.length : 1;
                 if (pixelCount > 100) return;
 
-                // SÉCURITÉ 2 : Analyseur de Tracé Robotique (Ligne par ligne)
+                // Analyseur de Tracé Robotique
                 let pData = patternMap.get(ip);
                 if (!pData) { pData = { history: [], warnings: 0 }; patternMap.set(ip, pData); }
                 
-                // On analyse uniquement les tracés de pixels simples 1x1 (car la gomme custom envoie aussi des paquets)
                 if (pixelCount === 1) {
                     pData.history.push({x, y});
                     if (pData.history.length > 12) {
@@ -179,30 +177,28 @@ wss.on('connection', (ws, req) => {
                             const dx = curr.x - prev.x;
                             const dy = curr.y - prev.y;
                             
-                            // Si la ligne suit PARFAITEMENT l'axe X (dx = 1, dy = 0) ou change strictement de ligne...
                             const isStrictStep = (Math.abs(dx) === 1 && dy === 0) || (Math.abs(dy) === 1 && Math.abs(dx) > 2);
                             if (!isStrictStep) {
-                                isRaster = false; // Mouvement humain imprécis détecté, on annule l'alerte
+                                isRaster = false; 
                                 break;
                             }
                         }
 
                         if (isRaster) {
                             pData.warnings++;
-                            pData.history = []; // Reset l'historique
+                            pData.history = []; 
                             if (pData.warnings >= 2) {
-                                // PUNITION SÉVÈRE : Vidage de l'énergie et ban de 10 secondes
                                 energyMap.set(ip, { tokens: 0, lastUpdate: now }); 
                                 cooldowns.set(ip, now + 10000); 
                                 return ws.send(JSON.stringify({ type: 'error', msg: 'Bot détecté (Ligne stricte).' }));
                             }
                         } else {
-                            pData.warnings = Math.max(0, pData.warnings - 0.2); // Baisse de l'alerte si comportement humain
+                            pData.warnings = Math.max(0, pData.warnings - 0.2); 
                         }
                     }
                 }
 
-                // SÉCURITÉ 3 : La Jauge d'Endurance
+                // La Jauge d'Endurance
                 let energyData = energyMap.get(ip);
                 if (!energyData) {
                     energyData = { tokens: MAX_ENERGY, lastUpdate: now };
@@ -214,7 +210,7 @@ wss.on('connection', (ws, req) => {
                 }
 
                 if (energyData.tokens < pixelCount) {
-                    cooldowns.set(ip, now + 2000); // Pénalité courte
+                    cooldowns.set(ip, now + 2000);
                     return ws.send(JSON.stringify({ type: 'error', msg: 'Endurance épuisée.' }));
                 }
 
@@ -281,9 +277,7 @@ const FRONTEND_HTML = `
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Pixel - florianscher.fr</title>
-    <!-- Module pour la roue chromatique -->
     <script src="https://cdn.jsdelivr.net/npm/@jaames/iro@5"></script>
-    <!-- Module pour TOUS les emojis natifs ! -->
     <script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@1/index.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; user-select: none; touch-action: none; overscroll-behavior: none; }
@@ -486,6 +480,7 @@ const FRONTEND_HTML = `
         offCanvas.height = SIZE;
         const offCtx = offCanvas.getContext('2d', { alpha: false });
 
+        // États des contrôles
         let isPanning = false;
         let isPainting = false;
         let isMoved = false;
@@ -493,13 +488,20 @@ const FRONTEND_HTML = `
         let lastMouseY = 0;
         let lastInputWasTouch = false; 
         
+        // Tactile
         let isPinching = false;
         let lastPinchDist = null;
+        let blockDrawingUntil = 0; // SÉCURITÉ ANTI-RATURE : Bloque le dessin temporairement
 
+        // NOUVEAUTÉ : Initialisation d'une couleur Hex aléatoire
         let currentTool = 'brush'; 
         let brushMode = 'normal'; 
-        let currentColor = '#ff0000';
-        let myEmoji = '👽';
+        let currentColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
+        
+        // NOUVEAUTÉ : Initialisation d'un Emoji aléatoire
+        const defaultEmojis = ['👽', '👻', '🤖', '💩', '🤡', '👾', '🐱', '🐶', '🦊', '🐵', '🐸', '🐷', '🐼', '🐻', '🦁', '🐮', '🦄', '🐔', '🐉', '🦖'];
+        let myEmoji = defaultEmojis[Math.floor(Math.random() * defaultEmojis.length)];
+        btnPseudo.innerText = "Pseudo: " + myEmoji;
         
         let pendingQueue = []; 
         let lastSendTime = 0;
@@ -512,7 +514,7 @@ const FRONTEND_HTML = `
         let showCursors = false;
         const otherCursors = new Map(); 
         let lastCursorSendTime = 0;
-        let serverSessionKey = 0; // SÉCURITÉ : La clé de session unique de ce client
+        let serverSessionKey = 0; 
 
         function closeAllPanels() {
             colorPanel.style.display = 'none';
@@ -593,7 +595,7 @@ const FRONTEND_HTML = `
 
         var colorPicker = new iro.ColorPicker("#colorPickerWheel", {
             width: 150,
-            color: currentColor,
+            color: currentColor, // Applique la couleur aléatoire initiale
             borderWidth: 2,
             borderColor: "#ffffff",
             layout: [
@@ -601,6 +603,10 @@ const FRONTEND_HTML = `
                 { component: iro.ui.Slider, options: { sliderType: 'value' } }
             ]
         });
+        
+        // MAJ Visuelle de la couleur aléatoire initiale
+        colorBtnIndicator.style.backgroundColor = currentColor;
+        hexInput.value = currentColor;
 
         function hexToRgbClient(hex) {
             return {
@@ -822,18 +828,26 @@ const FRONTEND_HTML = `
             }
         });
 
+        // TACTILE : GESTION SÉCURISÉE DU DESSIN ET MULTITOUCH
         canvas.addEventListener('touchstart', (e) => {
             lastInputWasTouch = true;
             if (e.target === canvas) e.preventDefault();
             
-            if (e.touches.length === 2) {
+            if (e.touches.length >= 2) {
+                // Dès que 2 doigts touchent : On passe en mode Navigation et on VERROUILLE le dessin
                 isPinching = true;
                 isPanning = true;
                 isPainting = false;
+                blockDrawingUntil = Date.now() + 500; // Verrouille le pinceau pour éviter les ratures
+                
                 lastPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
                 lastMouseX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
                 lastMouseY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                
             } else if (e.touches.length === 1 && e.target === canvas) {
+                // Sécurité : On vérifie que la période de grâce de 0.5s est terminée avant de peindre
+                if (Date.now() < blockDrawingUntil) return;
+                
                 isPinching = false;
                 isPanning = false;
                 isPainting = true; 
@@ -846,7 +860,8 @@ const FRONTEND_HTML = `
         }, {passive: false});
 
         function handleMove(e) {
-            if (isPinching && e.touches && e.touches.length === 2) {
+            if (isPinching && e.touches && e.touches.length >= 2) {
+                blockDrawingUntil = Date.now() + 500; // Renouvelle le verrou de sécurité pendant la navigation
                 const currentDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
                 const zoomFactor = currentDist / lastPinchDist;
                 lastPinchDist = currentDist;
@@ -888,6 +903,11 @@ const FRONTEND_HTML = `
                 draw();
                 emitCursorPosition();
             } else if (isPainting && (currentTool === 'brush' || currentTool === 'eraser')) {
+                // Sécurité stricte pendant le mouvement
+                if (Date.now() < blockDrawingUntil) {
+                    isPainting = false;
+                    return;
+                }
                 isMoved = true; 
                 triggerTool(pos.canvasX, pos.canvasY);
             }
@@ -902,14 +922,11 @@ const FRONTEND_HTML = `
         canvas.addEventListener('mouseleave', () => { hoverX = -1; hoverY = -1; draw(); });
 
         window.addEventListener('touchend', (e) => {
-            if (isPainting && !isMoved && e.target === canvas && e.changedTouches) {
-                const pos = getEventData(e);
-                triggerTool(pos.canvasX, pos.canvasY);
-                emitCursorPosition();
-            }
-
-            if (e.touches && e.touches.length < 2) {
+            // Un doigt se retire. Était-on en train de naviguer ?
+            if (e.touches.length < 2 && (isPinching || isPanning)) {
+                blockDrawingUntil = Date.now() + 500; // Déclenche la période de grâce de 0.5 sec finale !
                 isPinching = false;
+                
                 if (e.touches.length === 1) {
                     isPainting = false;
                     isPanning = false;
@@ -917,6 +934,18 @@ const FRONTEND_HTML = `
                     lastMouseY = e.touches[0].clientY;
                 }
             }
+
+            // Était-ce juste un clic rapide (1 doigt) pour poser un pixel ?
+            if (isPainting && !isMoved && e.target === canvas && e.changedTouches) {
+                // Ultime vérification du verrou de sécurité
+                if (Date.now() >= blockDrawingUntil) {
+                    const pos = getEventData({clientX: e.changedTouches[0].clientX, clientY: e.changedTouches[0].clientY});
+                    triggerTool(pos.canvasX, pos.canvasY);
+                    emitCursorPosition();
+                }
+            }
+
+            // Plus aucun doigt sur l'écran
             if (!e.touches || e.touches.length === 0) {
                 isPanning = false; 
                 isPainting = false;
@@ -995,7 +1024,6 @@ const FRONTEND_HTML = `
                 const data = JSON.parse(event.data);
                 
                 if (data.type === 'auth') {
-                    // SÉCURITÉ ANTI-BOT : Sauvegarde de la clé de session
                     serverSessionKey = data.key;
                 } else if (data.type === 'cursor') {
                     otherCursors.set(data.id, { x: data.x, y: data.y, emoji: data.emoji, time: Date.now() });
@@ -1149,7 +1177,6 @@ const FRONTEND_HTML = `
                         return;
                     }
 
-                    // SÉCURITÉ ANTI-BOT : Calcul de la preuve client envoyée au serveur
                     const proofToken = (p.x * 7) + (p.y * 3) + serverSessionKey;
 
                     ws.send(JSON.stringify({ 
