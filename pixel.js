@@ -14,18 +14,17 @@ const { WebSocketServer } = require('ws');
 const PORT = 80;
 const BOARD_WIDTH = 1000;
 const BOARD_HEIGHT = 1000;
-const BOARD_SIZE = BOARD_WIDTH * BOARD_HEIGHT * 3; // 3 octets par pixel (RGB)
-const COOLDOWN_MS = 100; // 0.1 seconde (Limite stricte de base)
+const BOARD_SIZE = BOARD_WIDTH * BOARD_HEIGHT * 3; 
+const COOLDOWN_MS = 100; 
 const BOARD_FILE = path.join(__dirname, 'board.dat');
 
 // --- ÉTAT DU SERVEUR ET SÉCURITÉ ANTI-BOT ---
 let board; 
-const cooldowns = new Map(); // ip -> nextAllowedTime
-const energyMap = new Map(); // ip -> { tokens, lastUpdate }
-const activeIps = new Set(); // Sécurité : Stocke les IPs ayant prouvé qu'elles peuvent bouger un curseur
-const patternMap = new Map(); // Analyse les tracés ligne-par-ligne (ip -> { history, warnings })
+const cooldowns = new Map(); 
+const energyMap = new Map(); 
+const activeIps = new Set(); 
+const patternMap = new Map(); 
 
-// Paramètres de la Jauge d'Endurance affinés
 const MAX_ENERGY = 800;       
 const REGEN_PER_SEC = 10;     
 
@@ -36,7 +35,7 @@ try {
         console.log(`[INIT] Plateau chargé depuis ${BOARD_FILE}`);
     } else {
         board = Buffer.alloc(BOARD_SIZE);
-        board.fill(26); // Remplit avec la couleur #1a1a1a par défaut
+        board.fill(26); 
         console.log('[INIT] Nouveau plateau sombre créé.');
     }
 } catch (err) {
@@ -412,7 +411,6 @@ const FRONTEND_HTML = `
                 </div>
 
                 <div class="hud-group">
-                    <!-- Par défaut, aucun outil n'est actif -->
                     <button id="btnBrushNormal" class="tool-btn">1x1</button>
                     <button id="btnBrushCustom" class="tool-btn">Custom</button>
                     <button id="btnEditBrush" class="tool-btn" style="display: none;">Forme</button>
@@ -481,7 +479,6 @@ const FRONTEND_HTML = `
         offCanvas.height = SIZE;
         const offCtx = offCanvas.getContext('2d', { alpha: false });
 
-        // États des contrôles
         let isPanning = false;
         let isPainting = false;
         let isMoved = false;
@@ -489,12 +486,10 @@ const FRONTEND_HTML = `
         let lastMouseY = 0;
         let lastInputWasTouch = false; 
         
-        // Tactile
         let isPinching = false;
         let lastPinchDist = null;
         let blockDrawingUntil = 0; 
 
-        // Outil désactivé par défaut
         let currentTool = 'none'; 
         let brushMode = 'normal'; 
         let currentColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
@@ -823,7 +818,6 @@ const FRONTEND_HTML = `
             }
         }
 
-        // SOURIS
         canvas.addEventListener('mousedown', (e) => {
             lastInputWasTouch = false;
             const pos = getEventData(e);
@@ -841,7 +835,6 @@ const FRONTEND_HTML = `
             }
         });
 
-        // TACTILE : Navigation native 1 doigt si outil désactivé
         canvas.addEventListener('touchstart', (e) => {
             lastInputWasTouch = true;
             if (e.target === canvas) e.preventDefault();
@@ -852,7 +845,7 @@ const FRONTEND_HTML = `
                 isPainting = false;
                 blockDrawingUntil = Date.now() + 500; 
                 
-                deactivateTools(); // DÉSACTIVE L'OUTIL LORS DU ZOOM/DÉPLACEMENT
+                deactivateTools(); 
                 
                 lastPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
                 lastMouseX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
@@ -1295,3 +1288,4 @@ const FRONTEND_HTML = `
     </script>
 </body>
 </html>
+`;
