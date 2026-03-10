@@ -1090,7 +1090,10 @@ const FRONTEND_HTML = `
 
             // Aperçu du pinceau sous la souris (Visible en continu)
             if (hoverX >= 0 && (currentTool === 'brush' || currentTool === 'eraser') && !isPanning && !isPinching) {
-                ctx.fillStyle = currentTool === 'eraser' ? 'rgba(255, 255, 255, 0.8)' : 'rgba(255, 255, 255, 0.5)';
+                // SÉCURITÉ VISUELLE : Inversion de couleur pour un contraste parfait garanti
+                ctx.globalCompositeOperation = 'difference';
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'; 
+                
                 if (brushMode === 'custom') {
                     for (let i = 0; i < 100; i++) {
                         if (customBrush[i]) {
@@ -1102,6 +1105,9 @@ const FRONTEND_HTML = `
                 } else {
                     ctx.fillRect(hoverX, hoverY, 1, 1);
                 }
+                
+                // Rétablissement du mode de fusion classique
+                ctx.globalCompositeOperation = 'source-over';
             }
             
             ctx.restore();
