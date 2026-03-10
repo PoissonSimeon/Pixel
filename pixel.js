@@ -654,20 +654,31 @@ const FRONTEND_HTML = `
         }
 
         btnBrushNormal.addEventListener('click', () => { 
-            currentTool = 'brush'; brushMode = 'normal'; 
-            setActiveTool(btnBrushNormal); 
-            btnEditBrush.style.display = 'none';
+            if (currentTool === 'brush' && brushMode === 'normal') {
+                deactivateTools();
+                btnEditBrush.style.display = 'none';
+            } else {
+                currentTool = 'brush'; brushMode = 'normal'; 
+                setActiveTool(btnBrushNormal); 
+                btnEditBrush.style.display = 'none';
+            }
             closeAllPanels();
         });
         
         btnBrushCustom.addEventListener('click', () => { 
-            currentTool = 'brush'; brushMode = 'custom'; 
-            setActiveTool(btnBrushCustom); 
-            btnEditBrush.style.display = 'flex';
-            
-            const isVisible = brushPanel.style.display === 'flex';
-            closeAllPanels();
-            if (!isVisible) brushPanel.style.display = 'flex';
+            if (currentTool === 'brush' && brushMode === 'custom') {
+                deactivateTools();
+                btnEditBrush.style.display = 'none';
+                closeAllPanels();
+            } else {
+                currentTool = 'brush'; brushMode = 'custom'; 
+                setActiveTool(btnBrushCustom); 
+                btnEditBrush.style.display = 'flex';
+                
+                const isVisible = brushPanel.style.display === 'flex';
+                closeAllPanels();
+                if (!isVisible) brushPanel.style.display = 'flex';
+            }
         });
 
         btnEditBrush.addEventListener('click', () => {
@@ -677,19 +688,28 @@ const FRONTEND_HTML = `
         });
 
         btnEraser.addEventListener('click', () => { 
-            currentTool = 'eraser'; 
-            setActiveTool(btnEraser); 
-            if (brushMode === 'custom') {
-                btnEditBrush.style.display = 'flex';
-            } else {
+            if (currentTool === 'eraser') {
+                deactivateTools();
                 btnEditBrush.style.display = 'none';
+            } else {
+                currentTool = 'eraser'; 
+                setActiveTool(btnEraser); 
+                if (brushMode === 'custom') {
+                    btnEditBrush.style.display = 'flex';
+                } else {
+                    btnEditBrush.style.display = 'none';
+                }
             }
             closeAllPanels();
         });
 
         btnPipette.addEventListener('click', () => { 
-            currentTool = 'pipette'; 
-            setActiveTool(btnPipette); 
+            if (currentTool === 'pipette') {
+                deactivateTools();
+            } else {
+                currentTool = 'pipette'; 
+                setActiveTool(btnPipette); 
+            }
             closeAllPanels();
         });
 
