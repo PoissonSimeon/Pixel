@@ -872,11 +872,10 @@ const FRONTEND_HTML = `
                 lastMouseY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
                 
             } else if (e.touches.length === 1 && e.target === canvas) {
-                if (Date.now() < blockDrawingUntil) return;
-                
                 isPinching = false;
                 
                 if (currentTool === 'none') {
+                    // MODE DÉPLACEMENT : On navigue instantanément, on ignore le blocage des 0.5s !
                     isPanning = true;
                     isPainting = false;
                     isMoved = false;
@@ -884,6 +883,9 @@ const FRONTEND_HTML = `
                     lastMouseX = pos.screenX; 
                     lastMouseY = pos.screenY;
                 } else {
+                    // MODE DESSIN : On respecte le blocage de 0.5s pour éviter les ratures après un zoom
+                    if (Date.now() < blockDrawingUntil) return;
+                    
                     isPanning = false;
                     isPainting = true; 
                     isMoved = false;
