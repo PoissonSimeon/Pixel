@@ -15,12 +15,19 @@ const PORT = 80;
 const BOARD_WIDTH = 1000;
 const BOARD_HEIGHT = 1000;
 const BOARD_SIZE = BOARD_WIDTH * BOARD_HEIGHT * 3; // 3 octets par pixel (RGB)
-const COOLDOWN_MS = 100; // 0.1 seconde (Limite stricte serveur)
+const COOLDOWN_MS = 100; // 0.1 seconde (Limite stricte de base)
 const BOARD_FILE = path.join(__dirname, 'board.dat');
 
-// --- ÉTAT DU SERVEUR ---
+// --- ÉTAT DU SERVEUR ET SÉCURITÉ ANTI-BOT ---
 let board; 
-const cooldowns = new Map(); 
+const cooldowns = new Map(); // ip -> nextAllowedTime
+const energyMap = new Map(); // ip -> { tokens, lastUpdate }
+const activeIps = new Set(); // Sécurité : Stocke les IPs ayant prouvé qu'elles peuvent bouger un curseur
+const patternMap = new Map(); // NOUVEAU : Analyse les tracés ligne-par-ligne (ip -> { history, warnings })
+
+// Paramètres de la Jauge d'Endurance affinés
+const MAX_ENERGY = 800;       
+const REGEN_PER_SEC = 10;     // Recharge ralentie pour étouffer les gros bots
 
 // --- INITIALISATION DU PLATEAU ---
 try {
@@ -44,11 +51,18 @@ setInterval(() => {
     });
 }, 60000);
 
-// Nettoyage de la map des cooldowns toutes les minutes
+// Nettoyage de la mémoire
 setInterval(() => {
     const now = Date.now();
     for (const [ip, time] of cooldowns.entries()) {
-        if (now - time > COOLDOWN_MS * 2) cooldowns.delete(ip);
+        if (now > time + 10000) cooldowns.delete(ip);
+    }
+    for (const [ip, data] of energyMap.entries()) {
+        if (now - data.lastUpdate > 120000) {
+            energyMap.delete(ip);
+            activeIps.delete(ip);
+            patternMap.delete(ip);
+        }
     }
 }, 60000);
 
@@ -91,6 +105,10 @@ const wss = new WebSocketServer({ server });
 wss.on('connection', (ws, req) => {
     const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
     ws.clientId = Math.random().toString(36).substring(2, 9); 
+    
+    // NOUVEAU : Création d'une clé de session secrète pour contrer les scripts "bêtes"
+    ws.sessionKey = Math.floor(Math.random() * 1000000);
+    ws.send(JSON.stringify({ type: 'auth', key: ws.sessionKey }));
 
     const sendOnlineCount = () => {
         const msg = JSON.stringify({ type: 'stats', online: wss.clients.size });
@@ -106,8 +124,9 @@ wss.on('connection', (ws, req) => {
         try {
             const data = JSON.parse(message);
             
-            // Relais de la position et du pseudo (emoji)
+            // Relais de la position et Validation de la preuve d'humanité
             if (data.type === 'cursor') {
+                activeIps.add(ip); 
                 const broadcastMsg = JSON.stringify({ type: 'cursor', id: ws.clientId, x: data.x, y: data.y, emoji: data.emoji });
                 wss.clients.forEach(client => {
                     if (client !== ws && client.readyState === ws.OPEN) client.send(broadcastMsg);
@@ -117,10 +136,20 @@ wss.on('connection', (ws, req) => {
 
             if (data.type === 'pixel') {
                 const now = Date.now();
-                const lastAction = cooldowns.get(ip) || 0;
 
-                if (now - lastAction < COOLDOWN_MS) {
-                    return ws.send(JSON.stringify({ type: 'error', msg: 'Veuillez patienter.' }));
+                // SÉCURITÉ 1 : Preuve d'humanité via le Token de Session
+                const expectedToken = (Math.floor(data.x) * 7) + (Math.floor(data.y) * 3) + ws.sessionKey;
+                if (data.token !== expectedToken) {
+                    return ws.send(JSON.stringify({ type: 'error', msg: 'Client non officiel détecté.' }));
+                }
+
+                if (!activeIps.has(ip)) {
+                    return ws.send(JSON.stringify({ type: 'error', msg: 'Veuillez bouger votre curseur avant de peindre.' }));
+                }
+
+                const nextAllowed = cooldowns.get(ip) || 0;
+                if (now < nextAllowed) {
+                    return ws.send(JSON.stringify({ type: 'error', msg: 'Trop rapide.' }));
                 }
 
                 const x = Math.floor(data.x);
@@ -131,10 +160,71 @@ wss.on('connection', (ws, req) => {
                 if (isNaN(x) || isNaN(y) || x < -10 || x >= BOARD_WIDTH || y < -10 || y >= BOARD_HEIGHT) return;
                 if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
 
+                const pixelCount = (shape && Array.isArray(shape)) ? shape.length : 1;
+                if (pixelCount > 100) return;
+
+                // SÉCURITÉ 2 : Analyseur de Tracé Robotique (Ligne par ligne)
+                let pData = patternMap.get(ip);
+                if (!pData) { pData = { history: [], warnings: 0 }; patternMap.set(ip, pData); }
+                
+                // On analyse uniquement les tracés de pixels simples 1x1 (car la gomme custom envoie aussi des paquets)
+                if (pixelCount === 1) {
+                    pData.history.push({x, y});
+                    if (pData.history.length > 12) {
+                        pData.history.shift();
+                        let isRaster = true;
+                        for (let i = 1; i < 12; i++) {
+                            const prev = pData.history[i-1];
+                            const curr = pData.history[i];
+                            const dx = curr.x - prev.x;
+                            const dy = curr.y - prev.y;
+                            
+                            // Si la ligne suit PARFAITEMENT l'axe X (dx = 1, dy = 0) ou change strictement de ligne...
+                            const isStrictStep = (Math.abs(dx) === 1 && dy === 0) || (Math.abs(dy) === 1 && Math.abs(dx) > 2);
+                            if (!isStrictStep) {
+                                isRaster = false; // Mouvement humain imprécis détecté, on annule l'alerte
+                                break;
+                            }
+                        }
+
+                        if (isRaster) {
+                            pData.warnings++;
+                            pData.history = []; // Reset l'historique
+                            if (pData.warnings >= 2) {
+                                // PUNITION SÉVÈRE : Vidage de l'énergie et ban de 10 secondes
+                                energyMap.set(ip, { tokens: 0, lastUpdate: now }); 
+                                cooldowns.set(ip, now + 10000); 
+                                return ws.send(JSON.stringify({ type: 'error', msg: 'Bot détecté (Ligne stricte).' }));
+                            }
+                        } else {
+                            pData.warnings = Math.max(0, pData.warnings - 0.2); // Baisse de l'alerte si comportement humain
+                        }
+                    }
+                }
+
+                // SÉCURITÉ 3 : La Jauge d'Endurance
+                let energyData = energyMap.get(ip);
+                if (!energyData) {
+                    energyData = { tokens: MAX_ENERGY, lastUpdate: now };
+                    energyMap.set(ip, energyData);
+                } else {
+                    const elapsedSec = (now - energyData.lastUpdate) / 1000;
+                    energyData.tokens = Math.min(MAX_ENERGY, energyData.tokens + (elapsedSec * REGEN_PER_SEC));
+                    energyData.lastUpdate = now;
+                }
+
+                if (energyData.tokens < pixelCount) {
+                    cooldowns.set(ip, now + 2000); // Pénalité courte
+                    return ws.send(JSON.stringify({ type: 'error', msg: 'Endurance épuisée.' }));
+                }
+
+                energyData.tokens -= pixelCount;
+                const penalty = COOLDOWN_MS + (pixelCount * 5);
+                cooldowns.set(ip, now + penalty);
+
                 const { r, g, b } = hexToRgb(color);
                 
                 if (shape && Array.isArray(shape)) {
-                    if (shape.length > 100) return; 
                     for (let i = 0; i < shape.length; i++) {
                         const idx = parseInt(shape[i]);
                         if (isNaN(idx) || idx < 0 || idx > 99) continue;
@@ -159,8 +249,6 @@ wss.on('connection', (ws, req) => {
                         board[boardIdx + 2] = b;
                     }
                 }
-
-                cooldowns.set(ip, now);
 
                 const broadcastMsg = JSON.stringify({ type: 'pixel', x, y, color, shape });
                 wss.clients.forEach(client => {
@@ -198,16 +286,13 @@ const FRONTEND_HTML = `
     <!-- Module pour TOUS les emojis natifs ! -->
     <script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@1/index.js"></script>
     <style>
-        /* html, body avec height: 100% et overscroll-behavior previennent les comportements élastiques sur mobile */
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; user-select: none; touch-action: none; overscroll-behavior: none; }
         
-        /* Utilisation de 100dvh (Dynamic Viewport Height) : Répare le bug du HUD caché par la barre du navigateur mobile */
         #app { display: flex; flex-direction: column; height: 100dvh; width: 100vw; position: relative; }
         
         #canvas-wrapper { flex: 1; position: relative; overflow: hidden; background: #1a1a1a; cursor: crosshair; }
         canvas { display: block; touch-action: none; width: 100%; height: 100%; }
         
-        /* HUD centré, scrollable sur mobile si besoin */
         #hud { 
             background: #1e1e1e; border-top: 1px solid #333; padding: 12px 0; 
             width: 100%; box-sizing: border-box;
@@ -222,7 +307,6 @@ const FRONTEND_HTML = `
 
         .hud-group { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
-        /* Nouveaux boutons rectangulaires */
         .tool-btn { 
             background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); 
             color: white; border-radius: 8px; padding: 0 16px; height: 38px; 
@@ -232,7 +316,6 @@ const FRONTEND_HTML = `
         .tool-btn:hover { background: rgba(255,255,255,0.2); }
         .tool-btn.active { background: rgba(76, 175, 80, 0.5); border-color: #4caf50; box-shadow: 0 0 10px rgba(76, 175, 80, 0.5); }
         
-        /* Indicateur de couleur */
         #color-btn-indicator { width: 38px; height: 38px; border-radius: 8px; border: 2px solid rgba(255,255,255,0.5); cursor: pointer; box-shadow: 0 0 10px rgba(0,0,0,0.3); transition: transform 0.1s; flex-shrink: 0; }
         #color-btn-indicator:hover { transform: scale(1.05); border-color: white; }
 
@@ -240,7 +323,6 @@ const FRONTEND_HTML = `
         .icon-btn:hover { transform: scale(1.2); }
         #zoomSlider { cursor: pointer; width: 100px; accent-color: #4caf50; margin: 0 5px; }
 
-        /* Panneaux Flottants Multiples (Couleur, Pinceau) */
         .floating-panel {
             display: none; position: absolute; bottom: 80px; background: rgba(20, 20, 20, 0.95); 
             padding: 20px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); 
@@ -250,14 +332,12 @@ const FRONTEND_HTML = `
         #colorPanel { left: 50%; transform: translateX(-50%); flex-direction: column; align-items: center; gap: 15px; }
         #hexInput { width: 90px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 16px; font-weight: bold; text-transform: uppercase; outline: none; border-radius: 8px; padding: 8px; text-align: center; }
 
-        /* Editeur Custom Brush repensé */
         #brushPanel { left: 50%; transform: translateX(-50%); flex-direction: column; align-items: center; gap: 10px; }
         #brushEditor { display: grid; grid-template-columns: repeat(10, 1fr); width: 180px; height: 180px; background: #ccc; gap: 1px; border: 2px solid #555; cursor: crosshair; touch-action: none; border-radius: 4px; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); }
         .brush-cell { background: white; width: 100%; height: 100%; user-select: none; }
         .brush-cell.active { background: black; }
         .panel-title { color: white; font-size: 13px; font-weight: bold; }
 
-        /* Sélecteur Emoji Natif Web Component */
         emoji-picker {
             display: none; position: absolute; bottom: 80px; right: 20px; z-index: 50;
             --background: rgba(20, 20, 20, 0.95);
@@ -269,14 +349,12 @@ const FRONTEND_HTML = `
             box-shadow: 0 15px 40px rgba(0,0,0,0.8); border-radius: 10px;
         }
 
-        /* Infos Top optimisées */
-        #top-info { position: absolute; top: 15px; right: 15px; background: rgba(20, 20, 20, 0.85); padding: 8px 15px; border-radius: 20px; color: #fff; font-size: 13px; font-weight: bold; display: flex; gap: 15px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); pointer-events: none; z-index: 10; }
+        #top-info { position: absolute; top: 15px; right: 15px; background: rgba(20, 20, 20, 0.85); padding: 8px 15px; border-radius: 20px; color: #fff; font-size: 13px; font-weight: bold; display: flex; gap: 15px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); pointer-events: none; z-index: 10; transition: color 0.3s; }
         .info-segment { display: flex; align-items: center; gap: 5px; }
         .coords { color: #aaa; width: 85px; text-align: right; }
         .online-dot { color: #4caf50; font-size: 16px; }
         #status { color: #f44336; border-left: 1px solid #444; padding-left: 15px; }
 
-        /* UI de la Barre de Progression Dynamique */
         #progress-container {
             position: absolute; top: 60px; left: 50%; transform: translateX(-50%);
             background: rgba(20, 20, 20, 0.9); padding: 12px 20px; border-radius: 15px;
@@ -289,20 +367,16 @@ const FRONTEND_HTML = `
         .progress-bar-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
         #progress-bar-fill { height: 100%; width: 0%; background: #4caf50; transition: width 0.1s linear; }
 
-        /* RESPONSIVE MOBILE */
         @media (max-width: 768px) {
             #top-info { top: 10px; right: 10px; left: 10px; padding: 6px 12px; font-size: 11px; justify-content: space-between; }
             #status { border: none; padding-left: 0; }
             .hide-mobile { display: none !important; }
-            
-            /* L'emoji picker prend toute la place possible en bas au milieu */
             emoji-picker { left: 50%; transform: translateX(-50%); right: auto; width: 95vw; max-width: 350px; }
         }
     </style>
 </head>
 <body>
     <div id="app">
-        
         <div id="top-info">
             <span class="info-segment coords">X:<span id="valX">0</span> Y:<span id="valY">0</span></span>
             <span class="info-segment"><span class="online-dot">●</span> <span id="onlineCount">1</span> <span class="hide-mobile">en ligne</span></span>
@@ -322,7 +396,6 @@ const FRONTEND_HTML = `
         <div id="canvas-wrapper">
             <canvas id="viewCanvas"></canvas>
             
-            <!-- Panneaux Flottants -->
             <div id="colorPanel" class="floating-panel">
                 <div id="colorPickerWheel"></div>
                 <input type="text" id="hexInput" value="#ff0000" maxlength="7">
@@ -333,11 +406,9 @@ const FRONTEND_HTML = `
                 <div id="brushEditor"></div>
             </div>
 
-            <!-- Clavier d'Emojis Complet -->
             <emoji-picker id="emojiPanel"></emoji-picker>
         </div>
 
-        <!-- HUD principal scrollable si besoin, avec un inner centré -->
         <div id="hud">
             <div class="hud-inner">
                 <div class="hud-group hide-mobile">
@@ -392,6 +463,7 @@ const FRONTEND_HTML = `
         const zoomInBtn = document.getElementById('zoomInBtn');
 
         const statusEl = document.getElementById('status');
+        const topInfoEl = document.getElementById('top-info');
         const valX = document.getElementById('valX');
         const valY = document.getElementById('valY');
         const onlineCount = document.getElementById('onlineCount');
@@ -414,15 +486,13 @@ const FRONTEND_HTML = `
         offCanvas.height = SIZE;
         const offCtx = offCanvas.getContext('2d', { alpha: false });
 
-        // États des contrôles
         let isPanning = false;
         let isPainting = false;
         let isMoved = false;
         let lastMouseX = 0;
         let lastMouseY = 0;
-        let lastInputWasTouch = false; // Variable cruciale pour différencier mobile/souris
+        let lastInputWasTouch = false; 
         
-        // Tactile
         let isPinching = false;
         let lastPinchDist = null;
 
@@ -439,19 +509,17 @@ const FRONTEND_HTML = `
         let totalPendingBatch = 0;
         let progressHideTimeout;
 
-        // Joueurs
         let showCursors = false;
         const otherCursors = new Map(); 
         let lastCursorSendTime = 0;
+        let serverSessionKey = 0; // SÉCURITÉ : La clé de session unique de ce client
 
-        // --- GESTION DES PANNEAUX ---
         function closeAllPanels() {
             colorPanel.style.display = 'none';
             brushPanel.style.display = 'none';
             emojiPanel.style.display = 'none';
         }
 
-        // --- GESTION DU PSEUDO (CLAVIER EMOJI COMPLET) ---
         btnPseudo.addEventListener('click', () => {
             const isVisible = emojiPanel.style.display === 'block'; 
             closeAllPanels();
@@ -465,7 +533,6 @@ const FRONTEND_HTML = `
             emitCursorPosition();
         });
 
-        // --- GESTION DE L'EDITEUR DE PINCEAU (10x10) ---
         const customBrush = Array(100).fill(false);
         customBrush[44] = true; customBrush[45] = true; customBrush[54] = true; customBrush[55] = true;
 
@@ -524,7 +591,6 @@ const FRONTEND_HTML = `
         }, {passive: false});
         brushEditor.addEventListener('touchend', () => { isEditingBrush = false; });
 
-        // --- GESTION DES COULEURS ---
         var colorPicker = new iro.ColorPicker("#colorPickerWheel", {
             width: 150,
             color: currentColor,
@@ -569,7 +635,6 @@ const FRONTEND_HTML = `
             if (!isVisible) colorPanel.style.display = 'flex';
         });
 
-        // --- GESTION DES OUTILS ---
         function setActiveTool(toolBtn) {
             btnBrushNormal.classList.remove('active');
             btnBrushCustom.classList.remove('active');
@@ -626,12 +691,9 @@ const FRONTEND_HTML = `
         });
 
         canvas.addEventListener('contextmenu', e => e.preventDefault());
-
-        // Ferme les panneaux si on clique sur la toile
         canvas.addEventListener('mousedown', closeAllPanels);
         canvas.addEventListener('touchstart', closeAllPanels, {passive: true});
 
-        // --- GESTION DE LA JAUGE ---
         function updateProgressBar() {
             if (pendingQueue.length === 0) {
                 progressBarFill.style.width = '100%';
@@ -660,7 +722,6 @@ const FRONTEND_HTML = `
             }
         }
 
-        // --- GESTION DU ZOOM ---
         function applyZoom(newScale, centerOnScreen = false, targetX = 0, targetY = 0) {
             newScale = Math.max(0.1, Math.min(newScale, 30));
             const actualZoomFactor = newScale / scale;
@@ -678,7 +739,6 @@ const FRONTEND_HTML = `
             emitCursorPosition();
         }
 
-        // Rétablissement des contrôles de zoom PC
         zoomSlider.addEventListener('input', (e) => applyZoom(parseFloat(e.target.value), true));
         zoomOutBtn.addEventListener('click', () => applyZoom(0.1, true));
         zoomInBtn.addEventListener('click', () => applyZoom(30, true));
@@ -691,7 +751,6 @@ const FRONTEND_HTML = `
             applyZoom(scale * zoomFactor, false, pos.canvasX, pos.canvasY);
         }, {passive: false});
 
-        // --- NAVIGATION ET DESSIN ---
         function resize() {
             canvas.width = wrapper.clientWidth;
             canvas.height = wrapper.clientHeight;
@@ -730,14 +789,12 @@ const FRONTEND_HTML = `
             }
         }
 
-        // Envoi du curseur virtuel de manière intelligente selon le type de périphérique
         function emitCursorPosition() {
             const now = Date.now();
             if (now - lastCursorSendTime > 100 && ws && ws.readyState === WebSocket.OPEN) {
                 let emitX = hoverX;
                 let emitY = hoverY;
 
-                // Si l'utilisateur est sur smartphone, son curseur est la croix virtuelle centrale
                 if (lastInputWasTouch) {
                     const rect = canvas.getBoundingClientRect();
                     emitX = Math.floor((rect.width / 2 - offsetX) / scale);
@@ -751,7 +808,6 @@ const FRONTEND_HTML = `
             }
         }
 
-        // Souris
         canvas.addEventListener('mousedown', (e) => {
             lastInputWasTouch = false;
             const pos = getEventData(e);
@@ -766,7 +822,6 @@ const FRONTEND_HTML = `
             }
         });
 
-        // Tactile : Gérer le saut/téléportation et les clics accidentels
         canvas.addEventListener('touchstart', (e) => {
             lastInputWasTouch = true;
             if (e.target === canvas) e.preventDefault();
@@ -786,7 +841,7 @@ const FRONTEND_HTML = `
                 const pos = getEventData(e);
                 lastMouseX = pos.screenX; 
                 lastMouseY = pos.screenY;
-                // On NE PEINT PLUS immédiatement pour éviter le pixel accidentel si le second doigt arrive juste après
+                emitCursorPosition();
             }
         }, {passive: false});
 
@@ -800,14 +855,12 @@ const FRONTEND_HTML = `
                 const centerClientY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
                 const rect = canvas.getBoundingClientRect();
                 
-                // On effectue le déplacement (Pan) en premier
                 offsetX += centerClientX - lastMouseX;
                 offsetY += centerClientY - lastMouseY;
                 
                 lastMouseX = centerClientX;
                 lastMouseY = centerClientY;
 
-                // Ensuite on applique le zoom sur le nouveau centre
                 applyZoom(scale * zoomFactor, false, centerClientX - rect.left, centerClientY - rect.top);
                 return;
             }
@@ -822,6 +875,7 @@ const FRONTEND_HTML = `
                     valY.innerText = by;
                     hoverX = bx;
                     hoverY = by;
+                    emitCursorPosition();
                 } else {
                     hoverX = -1; hoverY = -1;
                 }
@@ -834,7 +888,7 @@ const FRONTEND_HTML = `
                 draw();
                 emitCursorPosition();
             } else if (isPainting && (currentTool === 'brush' || currentTool === 'eraser')) {
-                isMoved = true; // Empêche le déclenchement d'un pixel en mode "tap rapide"
+                isMoved = true; 
                 triggerTool(pos.canvasX, pos.canvasY);
             }
             
@@ -848,7 +902,6 @@ const FRONTEND_HTML = `
         canvas.addEventListener('mouseleave', () => { hoverX = -1; hoverY = -1; draw(); });
 
         window.addEventListener('touchend', (e) => {
-            // Gestion du Tap tactile simple (Peindre un seul pixel)
             if (isPainting && !isMoved && e.target === canvas && e.changedTouches) {
                 const pos = getEventData(e);
                 triggerTool(pos.canvasX, pos.canvasY);
@@ -879,7 +932,6 @@ const FRONTEND_HTML = `
             else btnBrushCustom.click();
         }
 
-        // --- MOTEUR DE RENDU ---
         function draw() {
             ctx.fillStyle = '#1a1a1a';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -921,7 +973,6 @@ const FRONTEND_HTML = `
             
             ctx.restore();
 
-            // Affichage des Emojis (Curseurs) Persistants
             if (showCursors) {
                 ctx.font = Math.max(20, scale * 2) + "px Arial";
                 ctx.textAlign = "center";
@@ -935,7 +986,6 @@ const FRONTEND_HTML = `
             }
         }
 
-        // --- WEBSOCKET ET API ---
         let ws;
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -944,11 +994,14 @@ const FRONTEND_HTML = `
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 
-                if (data.type === 'cursor') {
+                if (data.type === 'auth') {
+                    // SÉCURITÉ ANTI-BOT : Sauvegarde de la clé de session
+                    serverSessionKey = data.key;
+                } else if (data.type === 'cursor') {
                     otherCursors.set(data.id, { x: data.x, y: data.y, emoji: data.emoji, time: Date.now() });
                     if (showCursors) draw();
                 } else if (data.type === 'cursor_remove') {
-                    otherCursors.delete(data.id); // Le joueur est retiré de la carte SEULEMENT s'il se déconnecte !
+                    otherCursors.delete(data.id); 
                     if (showCursors) draw();
                 } else if (data.type === 'pixel') {
                     offCtx.fillStyle = data.color;
@@ -966,13 +1019,20 @@ const FRONTEND_HTML = `
                     
                     const lenBefore = pendingQueue.length;
                     pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.shapeStr === shapeStr));
-                    
-                    // Forcer le dessin permet de voir immédiatement les pixels des autres joueurs !
                     draw();
-                    
-                    if (pendingQueue.length !== lenBefore) {
-                        updateProgressBar();
-                    }
+                    if (pendingQueue.length !== lenBefore) updateProgressBar();
+
+                } else if (data.type === 'error') {
+                    topInfoEl.style.color = "#ff9800";
+                    statusEl.innerText = data.msg || "Ralentissez...";
+                    clearTimeout(window.statusTimeout);
+                    window.statusTimeout = setTimeout(() => {
+                        if (isReady) {
+                            topInfoEl.style.color = "#fff";
+                            statusEl.innerText = "Prêt à peindre";
+                        }
+                    }, 2000);
+
                 } else if (data.type === 'stats') {
                     onlineCount.innerText = data.online;
                 }
@@ -986,14 +1046,12 @@ const FRONTEND_HTML = `
         }
 
         function placePixel(bx, by) {
-            // Limite augmentée à 2000 pour permettre de longs traits continus avant envoi
             if (pendingQueue.length > 2000) return;
             if (pendingQueue.length === 0) totalPendingBatch = 0;
 
             const colorToUse = currentTool === 'eraser' ? DEFAULT_BG_COLOR : currentColor;
             const targetRgb = hexToRgbClient(colorToUse);
             
-            // 1. Création d'une "carte virtuelle" des pixels déjà en attente d'envoi
             const pendingState = new Map();
             for (const item of pendingQueue) {
                 if (item.shape) {
@@ -1012,11 +1070,9 @@ const FRONTEND_HTML = `
             if (brushMode === 'normal') {
                 if (bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
                     const key = bx + ',' + by;
-                    // Vérifie d'abord si c'est dans la file d'attente
                     if (pendingState.has(key)) {
                         if (pendingState.get(key) === colorToUse) return; 
                     } else {
-                        // Sinon vérifie la toile validée
                         const p = offCtx.getImageData(bx, by, 1, 1).data;
                         if (p[0] === targetRgb.r && p[1] === targetRgb.g && p[2] === targetRgb.b) return; 
                     }
@@ -1026,7 +1082,6 @@ const FRONTEND_HTML = `
             } else {
                 filteredOffsets = [];
                 
-                // Optimisation de lecture : On récupère tout le bloc 10x10 de la toile en 1 seule fois
                 const cropX = Math.max(0, bx - 5);
                 const cropY = Math.max(0, by - 5);
                 const cropW = Math.min(SIZE, bx + 5) - cropX;
@@ -1047,14 +1102,11 @@ const FRONTEND_HTML = `
                         if (px >= 0 && px < SIZE && py >= 0 && py < SIZE) {
                             const key = px + ',' + py;
                             
-                            // 1. Est-ce que le pixel va déjà être repeint de la bonne couleur par la file d'attente ?
                             if (pendingState.has(key)) {
                                 if (pendingState.get(key) !== colorToUse) {
-                                    filteredOffsets.push(i); // Couleur différente, on doit l'écraser
+                                    filteredOffsets.push(i); 
                                 }
-                            } 
-                            // 2. Sinon, est-il déjà de la bonne couleur sur la toile officielle ?
-                            else if (imgData) {
+                            } else if (imgData) {
                                 const localX = px - cropX;
                                 const localY = py - cropY;
                                 const dataIdx = (localY * cropW + localX) * 4;
@@ -1066,7 +1118,6 @@ const FRONTEND_HTML = `
                         }
                     }
                 }
-                // Si tous les sous-pixels du pinceau chevauchent une couleur identique (en attente ou validée), on annule !
                 if (filteredOffsets.length === 0) return; 
             }
 
@@ -1086,24 +1137,27 @@ const FRONTEND_HTML = `
 
         setInterval(() => {
             const now = Date.now();
-            // L'envoi est mis en PAUSE (!isPainting) tant que l'utilisateur maintient son trait
             if (!isPainting && pendingQueue.length > 0 && now - lastSendTime >= 130) {
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     const p = pendingQueue[0]; 
                     p.retries = (p.retries || 0) + 1;
 
-                    if (p.retries > 20) {
+                    if (p.retries > 150) {
                         pendingQueue.shift();
                         draw();
                         updateProgressBar(); 
                         return;
                     }
 
+                    // SÉCURITÉ ANTI-BOT : Calcul de la preuve client envoyée au serveur
+                    const proofToken = (p.x * 7) + (p.y * 3) + serverSessionKey;
+
                     ws.send(JSON.stringify({ 
                         type: 'pixel', 
                         x: p.x, y: p.y, 
                         color: p.color, 
-                        shape: p.shape 
+                        shape: p.shape,
+                        token: proofToken
                     }));
                     
                     lastSendTime = now;
