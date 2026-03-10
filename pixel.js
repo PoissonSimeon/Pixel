@@ -508,8 +508,9 @@ const FRONTEND_HTML = `
         let lastPinchDist = null;
         let blockDrawingUntil = 0; 
 
-        let currentTool = 'none'; 
-        let brushMode = 'normal'; 
+        // GESTION DU MODE OUTIL / FORME SÉPARÉS
+        let currentTool = 'none'; // 'none', 'brush', 'eraser', 'pipette'
+        let brushMode = 'normal'; // 'normal', 'custom'
         let currentColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
         
         const defaultEmojis = ['👽', '👻', '🤖', '💩', '🤡', '👾', '🐱', '🐶', '🦊', '🐵', '🐸', '🐷', '🐼', '🐻', '🦁', '🐮', '🦄', '🐔', '🐉', '🦖'];
@@ -548,19 +549,120 @@ const FRONTEND_HTML = `
             emitCursorPosition();
         });
 
+        // --- GESTION DE L'INTERFACE DES OUTILS ---
+        function updateToolUI() {
+            // Retire la sélection de tous les boutons
+            btnBrushNormal.classList.remove('active');
+            btnBrushCustom.classList.remove('active');
+            btnEraser.classList.remove('active');
+            btnPipette.classList.remove('active');
+
+            if (currentTool === 'none') {
+                wrapper.style.cursor = 'grab';
+                btnEditBrush.style.display = 'none';
+            } else {
+                wrapper.style.cursor = 'crosshair';
+                
+                if (currentTool === 'pipette') {
+                    btnPipette.classList.add('active');
+                    btnEditBrush.style.display = 'none';
+                } else if (currentTool === 'eraser') {
+                    // Double sélection visuelle : Outil ET Forme (ex: Gomme + 1x1)
+                    btnEraser.classList.add('active');
+                    if (brushMode === 'normal') {
+                        btnBrushNormal.classList.add('active');
+                        btnEditBrush.style.display = 'none';
+                    } else {
+                        btnBrushCustom.classList.add('active');
+                        btnEditBrush.style.display = 'flex';
+                    }
+                } else if (currentTool === 'brush') {
+                    if (brushMode === 'normal') {
+                        btnBrushNormal.classList.add('active');
+                        btnEditBrush.style.display = 'none';
+                    } else {
+                        btnBrushCustom.classList.add('active');
+                        btnEditBrush.style.display = 'flex';
+                    }
+                }
+            }
+            draw(); // Force la mise à jour de la prévisualisation du pinceau
+        }
+
+        btnBrushNormal.addEventListener('click', () => { 
+            // Si le pinceau 1x1 est DEJA actif, on le désactive
+            if (currentTool === 'brush' && brushMode === 'normal') {
+                currentTool = 'none';
+            } else {
+                // S'il ne l'était pas, on l'active (ou on modifie la forme de la gomme)
+                if (currentTool !== 'eraser') currentTool = 'brush';
+                brushMode = 'normal'; 
+            }
+            updateToolUI();
+            closeAllPanels();
+        });
+        
+        btnBrushCustom.addEventListener('click', () => { 
+            // Si le pinceau Custom est DEJA actif, on le désactive
+            if (currentTool === 'brush' && brushMode === 'custom') {
+                currentTool = 'none';
+                closeAllPanels();
+            } else {
+                if (currentTool !== 'eraser') currentTool = 'brush';
+                brushMode = 'custom'; 
+                updateToolUI();
+                
+                // Ouvre le menu Custom si on vient de l'activer (sauf si on est en gomme)
+                const isVisible = brushPanel.style.display === 'flex';
+                closeAllPanels();
+                if (!isVisible && currentTool !== 'none') brushPanel.style.display = 'flex';
+            }
+            updateToolUI();
+        });
+
+        btnEditBrush.addEventListener('click', () => {
+            const isVisible = brushPanel.style.display === 'flex';
+            closeAllPanels();
+            if (!isVisible) brushPanel.style.display = 'flex';
+        });
+
+        btnEraser.addEventListener('click', () => { 
+            // Si la gomme est DEJA active, on la désactive
+            if (currentTool === 'eraser') {
+                currentTool = 'none';
+            } else {
+                currentTool = 'eraser'; 
+            }
+            updateToolUI();
+            closeAllPanels();
+        });
+
+        btnPipette.addEventListener('click', () => { 
+            if (currentTool === 'pipette') {
+                currentTool = 'none';
+            } else {
+                currentTool = 'pipette'; 
+            }
+            updateToolUI();
+            closeAllPanels();
+        });
+
         // --- RACCOURCIS CLAVIER ---
         window.addEventListener('keydown', (e) => {
-            // Désactiver les raccourcis si l'utilisateur est dans un champ texte ou recherche un emoji
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'EMOJI-PICKER') return;
             
             const key = e.key.toLowerCase();
             if (key === 'b') {
-                btnBrushNormal.click();
+                if (currentTool === 'brush') currentTool = 'none';
+                else currentTool = 'brush';
+                updateToolUI();
+                closeAllPanels();
             } else if (key === 'e') {
                 btnEraser.click();
             }
         });
 
+        // --- EDITEUR DE FORME ---
         const customBrush = Array(100).fill(false);
         customBrush[44] = true; customBrush[45] = true; customBrush[54] = true; customBrush[55] = true;
 
@@ -578,6 +680,7 @@ const FRONTEND_HTML = `
             if (idx >= 0 && idx < 100) {
                 customBrush[idx] = state;
                 brushEditor.children[idx].className = 'brush-cell' + (state ? ' active' : '');
+                draw(); // Met à jour l'aperçu du pinceau en direct
             }
         }
 
@@ -664,84 +767,6 @@ const FRONTEND_HTML = `
             const isVisible = colorPanel.style.display === 'flex';
             closeAllPanels();
             if (!isVisible) colorPanel.style.display = 'flex';
-        });
-
-        function deactivateTools() {
-            currentTool = 'none';
-            btnBrushNormal.classList.remove('active');
-            btnBrushCustom.classList.remove('active');
-            btnEraser.classList.remove('active');
-            btnPipette.classList.remove('active');
-            wrapper.style.cursor = 'grab';
-        }
-
-        function setActiveTool(toolBtn) {
-            btnBrushNormal.classList.remove('active');
-            btnBrushCustom.classList.remove('active');
-            btnEraser.classList.remove('active');
-            btnPipette.classList.remove('active');
-            toolBtn.classList.add('active');
-            wrapper.style.cursor = 'crosshair';
-        }
-
-        btnBrushNormal.addEventListener('click', () => { 
-            if (currentTool === 'brush' && brushMode === 'normal') {
-                deactivateTools();
-                btnEditBrush.style.display = 'none';
-            } else {
-                currentTool = 'brush'; brushMode = 'normal'; 
-                setActiveTool(btnBrushNormal); 
-                btnEditBrush.style.display = 'none';
-            }
-            closeAllPanels();
-        });
-        
-        btnBrushCustom.addEventListener('click', () => { 
-            if (currentTool === 'brush' && brushMode === 'custom') {
-                deactivateTools();
-                btnEditBrush.style.display = 'none';
-                closeAllPanels();
-            } else {
-                currentTool = 'brush'; brushMode = 'custom'; 
-                setActiveTool(btnBrushCustom); 
-                btnEditBrush.style.display = 'flex';
-                
-                const isVisible = brushPanel.style.display === 'flex';
-                closeAllPanels();
-                if (!isVisible) brushPanel.style.display = 'flex';
-            }
-        });
-
-        btnEditBrush.addEventListener('click', () => {
-            const isVisible = brushPanel.style.display === 'flex';
-            closeAllPanels();
-            if (!isVisible) brushPanel.style.display = 'flex';
-        });
-
-        btnEraser.addEventListener('click', () => { 
-            if (currentTool === 'eraser') {
-                deactivateTools();
-                btnEditBrush.style.display = 'none';
-            } else {
-                currentTool = 'eraser'; 
-                setActiveTool(btnEraser); 
-                if (brushMode === 'custom') {
-                    btnEditBrush.style.display = 'flex';
-                } else {
-                    btnEditBrush.style.display = 'none';
-                }
-            }
-            closeAllPanels();
-        });
-
-        btnPipette.addEventListener('click', () => { 
-            if (currentTool === 'pipette') {
-                deactivateTools();
-            } else {
-                currentTool = 'pipette'; 
-                setActiveTool(btnPipette); 
-            }
-            closeAllPanels();
         });
 
         btnCursors.addEventListener('click', () => {
@@ -896,7 +921,8 @@ const FRONTEND_HTML = `
                 isPainting = false;
                 blockDrawingUntil = Date.now() + 500; 
                 
-                deactivateTools(); 
+                currentTool = 'none'; 
+                updateToolUI();
                 
                 lastPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
                 lastMouseX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
@@ -935,7 +961,6 @@ const FRONTEND_HTML = `
                 
                 const centerClientX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
                 const centerClientY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-                const rect = canvas.getBoundingClientRect();
                 
                 offsetX += centerClientX - lastMouseX;
                 offsetY += centerClientY - lastMouseY;
@@ -943,11 +968,12 @@ const FRONTEND_HTML = `
                 lastMouseX = centerClientX;
                 lastMouseY = centerClientY;
 
-                applyZoom(scale * zoomFactor, false, centerClientX - rect.left, centerClientY - rect.top);
+                applyZoom(scale * zoomFactor, false, centerClientX, centerClientY);
                 return;
             }
 
             const pos = getEventData(e);
+            let needDraw = false;
             
             if (e.target === canvas) {
                 const bx = Math.floor((pos.canvasX - offsetX) / scale);
@@ -955,11 +981,18 @@ const FRONTEND_HTML = `
                 if(bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
                     valX.innerText = bx;
                     valY.innerText = by;
-                    hoverX = bx;
-                    hoverY = by;
-                    emitCursorPosition();
+                    if (hoverX !== bx || hoverY !== by) {
+                        hoverX = bx;
+                        hoverY = by;
+                        emitCursorPosition();
+                        needDraw = true; // Redessiner pour la prévisualisation au survol (sur PC)
+                    }
                 } else {
-                    hoverX = -1; hoverY = -1;
+                    if (hoverX !== -1 || hoverY !== -1) {
+                        hoverX = -1;
+                        hoverY = -1;
+                        needDraw = true;
+                    }
                 }
             }
 
@@ -976,6 +1009,9 @@ const FRONTEND_HTML = `
                 }
                 isMoved = true; 
                 triggerTool(pos.canvasX, pos.canvasY);
+            } else if (needDraw && !isPanning && !isPainting) {
+                // Sur PC, dessiner la prévisualisation même si on ne clique pas
+                draw();
             }
             
             lastMouseX = pos.screenX; lastMouseY = pos.screenY;
@@ -990,7 +1026,11 @@ const FRONTEND_HTML = `
             if (currentTool === 'none') wrapper.style.cursor = 'grab';
         });
         
-        canvas.addEventListener('mouseleave', () => { hoverX = -1; hoverY = -1; draw(); });
+        canvas.addEventListener('mouseleave', () => { 
+            if (hoverX !== -1 || hoverY !== -1) {
+                hoverX = -1; hoverY = -1; draw(); 
+            }
+        });
 
         window.addEventListener('touchend', (e) => {
             if (e.touches && e.touches.length < 2 && (isPinching || isPanning)) {
@@ -1024,15 +1064,6 @@ const FRONTEND_HTML = `
             }
         });
 
-        function pickColor(x, y) {
-            const p = offCtx.getImageData(x, y, 1, 1).data;
-            const hex = "#" + (1 << 24 | p[0] << 16 | p[1] << 8 | p[2]).toString(16).padStart(6, '0').slice(-6);
-            updateColor(hex);
-            
-            if (brushMode === 'normal') btnBrushNormal.click();
-            else btnBrushCustom.click();
-        }
-
         function draw() {
             ctx.fillStyle = '#1a1a1a';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1057,6 +1088,7 @@ const FRONTEND_HTML = `
                 }
             }
 
+            // Aperçu du pinceau sous la souris (Visible en continu)
             if (hoverX >= 0 && (currentTool === 'brush' || currentTool === 'eraser') && !isPanning && !isPinching) {
                 ctx.fillStyle = currentTool === 'eraser' ? 'rgba(255, 255, 255, 0.8)' : 'rgba(255, 255, 255, 0.5)';
                 if (brushMode === 'custom') {
