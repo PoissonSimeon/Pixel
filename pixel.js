@@ -102,10 +102,21 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws, req) => {
-    const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
+    // SÉCURITÉ : Récupération IP via Cloudflare en priorité
+    const ip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
     ws.clientId = Math.random().toString(36).substring(2, 9); 
+    ws.ip = ip; 
+
+    // SÉCURITÉ : Limite stricte de 254 WebSockets par adresse IP
+    let connectionsFromIp = 0;
+    for (const client of wss.clients) {
+        if (client.ip === ip) connectionsFromIp++;
+    }
+    if (connectionsFromIp > 254) {
+        ws.close(1008, 'Too many connections');
+        return; 
+    }
     
-    // Création d'une clé de session secrète pour contrer les scripts "bêtes"
     ws.sessionKey = Math.floor(Math.random() * 1000000);
     ws.send(JSON.stringify({ type: 'auth', key: ws.sessionKey }));
 
@@ -125,7 +136,14 @@ wss.on('connection', (ws, req) => {
             
             if (data.type === 'cursor') {
                 activeIps.add(ip); 
-                const broadcastMsg = JSON.stringify({ type: 'cursor', id: ws.clientId, x: data.x, y: data.y, emoji: data.emoji });
+                
+                // SÉCURITÉ : Troncature de l'emoji à 2 caractères maximum (Anti-Spam Visuel)
+                let safeEmoji = '👽';
+                if (data.emoji && typeof data.emoji === 'string') {
+                    safeEmoji = Array.from(data.emoji).slice(0, 2).join(''); 
+                }
+
+                const broadcastMsg = JSON.stringify({ type: 'cursor', id: ws.clientId, x: data.x, y: data.y, emoji: safeEmoji });
                 wss.clients.forEach(client => {
                     if (client !== ws && client.readyState === ws.OPEN) client.send(broadcastMsg);
                 });
@@ -135,7 +153,6 @@ wss.on('connection', (ws, req) => {
             if (data.type === 'pixel') {
                 const now = Date.now();
 
-                // Preuve d'humanité via le Token de Session
                 const expectedToken = (Math.floor(data.x) * 7) + (Math.floor(data.y) * 3) + ws.sessionKey;
                 if (data.token !== expectedToken) {
                     return ws.send(JSON.stringify({ type: 'error', msg: 'Client non officiel détecté.' }));
@@ -161,7 +178,6 @@ wss.on('connection', (ws, req) => {
                 const pixelCount = (shape && Array.isArray(shape)) ? shape.length : 1;
                 if (pixelCount > 100) return;
 
-                // Analyseur de Tracé Robotique
                 let pData = patternMap.get(ip);
                 if (!pData) { pData = { history: [], warnings: 0 }; patternMap.set(ip, pData); }
                 
@@ -197,7 +213,6 @@ wss.on('connection', (ws, req) => {
                     }
                 }
 
-                // La Jauge d'Endurance
                 let energyData = energyMap.get(ip);
                 if (!energyData) {
                     energyData = { tokens: MAX_ENERGY, lastUpdate: now };
@@ -365,6 +380,9 @@ const FRONTEND_HTML = `
             #status { border: none; padding-left: 0; }
             .hide-mobile { display: none !important; }
             emoji-picker { left: 50%; transform: translateX(-50%); right: auto; width: 95vw; max-width: 350px; }
+            
+            /* Sur mobile, on cache les raccourcis clavier pour alléger l'interface */
+            .kbd-shortcut { display: none; }
         }
     </style>
 </head>
@@ -411,11 +429,11 @@ const FRONTEND_HTML = `
                 </div>
 
                 <div class="hud-group">
-                    <button id="btnBrushNormal" class="tool-btn">1x1</button>
+                    <button id="btnBrushNormal" class="tool-btn">1x1 <span class="kbd-shortcut">&nbsp;(B)</span></button>
                     <button id="btnBrushCustom" class="tool-btn">Custom</button>
                     <button id="btnEditBrush" class="tool-btn" style="display: none;">Forme</button>
 
-                    <button id="btnEraser" class="tool-btn">Gomme</button>
+                    <button id="btnEraser" class="tool-btn">Gomme <span class="kbd-shortcut">&nbsp;(E)</span></button>
                     <div id="color-btn-indicator" style="background-color: #ff0000;"></div>
                     <button id="btnPipette" class="tool-btn">Pipette</button>
                 </div>
@@ -528,6 +546,19 @@ const FRONTEND_HTML = `
             btnPseudo.innerText = "Pseudo: " + myEmoji;
             closeAllPanels();
             emitCursorPosition();
+        });
+
+        // --- RACCOURCIS CLAVIER ---
+        window.addEventListener('keydown', (e) => {
+            // Désactiver les raccourcis si l'utilisateur est dans un champ texte ou recherche un emoji
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'EMOJI-PICKER') return;
+            
+            const key = e.key.toLowerCase();
+            if (key === 'b') {
+                btnBrushNormal.click();
+            } else if (key === 'e') {
+                btnEraser.click();
+            }
         });
 
         const customBrush = Array(100).fill(false);
@@ -875,7 +906,6 @@ const FRONTEND_HTML = `
                 isPinching = false;
                 
                 if (currentTool === 'none') {
-                    // MODE DÉPLACEMENT : On navigue instantanément, on ignore le blocage des 0.5s !
                     isPanning = true;
                     isPainting = false;
                     isMoved = false;
@@ -883,7 +913,6 @@ const FRONTEND_HTML = `
                     lastMouseX = pos.screenX; 
                     lastMouseY = pos.screenY;
                 } else {
-                    // MODE DESSIN : On respecte le blocage de 0.5s pour éviter les ratures après un zoom
                     if (Date.now() < blockDrawingUntil) return;
                     
                     isPanning = false;
@@ -1310,4 +1339,3 @@ const FRONTEND_HTML = `
     </script>
 </body>
 </html>
-`;
