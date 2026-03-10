@@ -1064,6 +1064,23 @@ const FRONTEND_HTML = `
             }
         });
 
+        function pickColor(x, y) {
+            const p = offCtx.getImageData(x, y, 1, 1).data;
+            
+            // SÉCURITÉ : Conversion RGB vers HEX robuste
+            const r = p[0].toString(16).padStart(2, '0');
+            const g = p[1].toString(16).padStart(2, '0');
+            const b = p[2].toString(16).padStart(2, '0');
+            updateColor('#' + r + g + b);
+            
+            // FIX : Désactive le mode dessin immédiatement pour ne pas peindre le prochain pixel au moindre mouvement
+            isPainting = false;
+            isMoved = false;
+            
+            if (brushMode === 'normal') btnBrushNormal.click();
+            else btnBrushCustom.click();
+        }
+
         function draw() {
             ctx.fillStyle = '#1a1a1a';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1090,24 +1107,35 @@ const FRONTEND_HTML = `
 
             // Aperçu du pinceau sous la souris (Visible en continu)
             if (hoverX >= 0 && (currentTool === 'brush' || currentTool === 'eraser') && !isPanning && !isPinching) {
-                // SÉCURITÉ VISUELLE : Inversion de couleur pour un contraste parfait garanti
-                ctx.globalCompositeOperation = 'difference';
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'; 
                 
+                // Dessin de la couleur réelle avec transparence pour voir à travers
+                ctx.fillStyle = currentTool === 'eraser' ? '#ffffff' : currentColor;
+                ctx.globalAlpha = 0.8; 
+
+                ctx.beginPath();
                 if (brushMode === 'custom') {
                     for (let i = 0; i < 100; i++) {
                         if (customBrush[i]) {
                             const dx = (i % 10) - 5;
                             const dy = Math.floor(i / 10) - 5;
-                            ctx.fillRect(hoverX + dx, hoverY + dy, 1, 1);
+                            ctx.rect(hoverX + dx, hoverY + dy, 1, 1);
                         }
                     }
                 } else {
-                    ctx.fillRect(hoverX, hoverY, 1, 1);
+                    ctx.rect(hoverX, hoverY, 1, 1);
                 }
-                
-                // Rétablissement du mode de fusion classique
-                ctx.globalCompositeOperation = 'source-over';
+                ctx.fill();
+                ctx.globalAlpha = 1.0;
+
+                // Contour noir extérieur
+                ctx.lineWidth = Math.max(0.05, 1.5 / scale);
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.stroke();
+
+                // Ligne blanche intérieure pour garantir le contraste sur fond noir
+                ctx.lineWidth = Math.max(0.025, 0.5 / scale);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+                ctx.stroke();
             }
             
             ctx.restore();
