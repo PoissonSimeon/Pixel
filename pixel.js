@@ -284,7 +284,7 @@ const FRONTEND_HTML = `
         
         #app { display: flex; flex-direction: column; height: 100dvh; width: 100vw; position: relative; }
         
-        #canvas-wrapper { flex: 1; position: relative; overflow: hidden; background: #1a1a1a; cursor: crosshair; }
+        #canvas-wrapper { flex: 1; position: relative; overflow: hidden; background: #1a1a1a; cursor: grab; }
         canvas { display: block; touch-action: none; width: 100%; height: 100%; }
         
         #hud { 
@@ -412,7 +412,8 @@ const FRONTEND_HTML = `
                 </div>
 
                 <div class="hud-group">
-                    <button id="btnBrushNormal" class="tool-btn active">1x1</button>
+                    <!-- Par défaut, aucun outil n'est actif -->
+                    <button id="btnBrushNormal" class="tool-btn">1x1</button>
                     <button id="btnBrushCustom" class="tool-btn">Custom</button>
                     <button id="btnEditBrush" class="tool-btn" style="display: none;">Forme</button>
 
@@ -423,7 +424,6 @@ const FRONTEND_HTML = `
 
                 <div class="hud-group">
                     <button id="btnPseudo" class="tool-btn">Pseudo: 👽</button>
-                    <!-- On ajoute la classe 'active' pour l'allumer par défaut -->
                     <button id="btnCursors" class="tool-btn active">Joueurs</button>
                     <button id="exportBtn" class="tool-btn">Exporter</button>
                 </div>
@@ -492,14 +492,13 @@ const FRONTEND_HTML = `
         // Tactile
         let isPinching = false;
         let lastPinchDist = null;
-        let blockDrawingUntil = 0; // SÉCURITÉ ANTI-RATURE : Bloque le dessin temporairement
+        let blockDrawingUntil = 0; 
 
-        // NOUVEAUTÉ : Initialisation d'une couleur Hex aléatoire
-        let currentTool = 'brush'; 
+        // Outil désactivé par défaut
+        let currentTool = 'none'; 
         let brushMode = 'normal'; 
         let currentColor = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
         
-        // NOUVEAUTÉ : Initialisation d'un Emoji aléatoire
         const defaultEmojis = ['👽', '👻', '🤖', '💩', '🤡', '👾', '🐱', '🐶', '🦊', '🐵', '🐸', '🐷', '🐼', '🐻', '🦁', '🐮', '🦄', '🐔', '🐉', '🦖'];
         let myEmoji = defaultEmojis[Math.floor(Math.random() * defaultEmojis.length)];
         btnPseudo.innerText = "Pseudo: " + myEmoji;
@@ -512,7 +511,6 @@ const FRONTEND_HTML = `
         let totalPendingBatch = 0;
         let progressHideTimeout;
 
-        // On passe la variable à true pour afficher les joueurs par défaut
         let showCursors = true;
         const otherCursors = new Map(); 
         let lastCursorSendTime = 0;
@@ -597,7 +595,7 @@ const FRONTEND_HTML = `
 
         var colorPicker = new iro.ColorPicker("#colorPickerWheel", {
             width: 150,
-            color: currentColor, // Applique la couleur aléatoire initiale
+            color: currentColor,
             borderWidth: 2,
             borderColor: "#ffffff",
             layout: [
@@ -606,7 +604,6 @@ const FRONTEND_HTML = `
             ]
         });
         
-        // MAJ Visuelle de la couleur aléatoire initiale
         colorBtnIndicator.style.backgroundColor = currentColor;
         hexInput.value = currentColor;
 
@@ -642,6 +639,15 @@ const FRONTEND_HTML = `
             closeAllPanels();
             if (!isVisible) colorPanel.style.display = 'flex';
         });
+
+        function deactivateTools() {
+            currentTool = 'none';
+            btnBrushNormal.classList.remove('active');
+            btnBrushCustom.classList.remove('active');
+            btnEraser.classList.remove('active');
+            btnPipette.classList.remove('active');
+            wrapper.style.cursor = 'grab';
+        }
 
         function setActiveTool(toolBtn) {
             btnBrushNormal.classList.remove('active');
@@ -789,6 +795,7 @@ const FRONTEND_HTML = `
         }
 
         function triggerTool(cx, cy) {
+            if (currentTool === 'none') return;
             const bx = Math.floor((cx - offsetX) / scale);
             const by = Math.floor((cy - offsetY) / scale);
             if(bx >= 0 && bx < SIZE && by >= 0 && by < SIZE) {
@@ -816,54 +823,68 @@ const FRONTEND_HTML = `
             }
         }
 
+        // SOURIS
         canvas.addEventListener('mousedown', (e) => {
             lastInputWasTouch = false;
             const pos = getEventData(e);
             lastMouseX = pos.screenX; lastMouseY = pos.screenY;
             isMoved = false;
             
-            if (e.button === 2) isPanning = true;
-            else if (e.button === 0) {
+            if (e.button === 2 || currentTool === 'none') {
+                isPanning = true;
+                isPainting = false;
+                if (currentTool === 'none') wrapper.style.cursor = 'grabbing';
+            } else if (e.button === 0) {
                 isPainting = true;
                 triggerTool(pos.canvasX, pos.canvasY);
                 emitCursorPosition();
             }
         });
 
-        // TACTILE : GESTION SÉCURISÉE DU DESSIN ET MULTITOUCH
+        // TACTILE : Navigation native 1 doigt si outil désactivé
         canvas.addEventListener('touchstart', (e) => {
             lastInputWasTouch = true;
             if (e.target === canvas) e.preventDefault();
             
             if (e.touches.length >= 2) {
-                // Dès que 2 doigts touchent : On passe en mode Navigation et on VERROUILLE le dessin
                 isPinching = true;
                 isPanning = true;
                 isPainting = false;
-                blockDrawingUntil = Date.now() + 500; // Verrouille le pinceau pour éviter les ratures
+                blockDrawingUntil = Date.now() + 500; 
+                
+                deactivateTools(); // DÉSACTIVE L'OUTIL LORS DU ZOOM/DÉPLACEMENT
                 
                 lastPinchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
                 lastMouseX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
                 lastMouseY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
                 
             } else if (e.touches.length === 1 && e.target === canvas) {
-                // Sécurité : On vérifie que la période de grâce de 0.5s est terminée avant de peindre
                 if (Date.now() < blockDrawingUntil) return;
                 
                 isPinching = false;
-                isPanning = false;
-                isPainting = true; 
-                isMoved = false;
-                const pos = getEventData(e);
-                lastMouseX = pos.screenX; 
-                lastMouseY = pos.screenY;
-                emitCursorPosition();
+                
+                if (currentTool === 'none') {
+                    isPanning = true;
+                    isPainting = false;
+                    isMoved = false;
+                    const pos = getEventData(e);
+                    lastMouseX = pos.screenX; 
+                    lastMouseY = pos.screenY;
+                } else {
+                    isPanning = false;
+                    isPainting = true; 
+                    isMoved = false;
+                    const pos = getEventData(e);
+                    lastMouseX = pos.screenX; 
+                    lastMouseY = pos.screenY;
+                    emitCursorPosition();
+                }
             }
         }, {passive: false});
 
         function handleMove(e) {
             if (isPinching && e.touches && e.touches.length >= 2) {
-                blockDrawingUntil = Date.now() + 500; // Renouvelle le verrou de sécurité pendant la navigation
+                blockDrawingUntil = Date.now() + 500; 
                 const currentDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
                 const zoomFactor = currentDist / lastPinchDist;
                 lastPinchDist = currentDist;
@@ -904,8 +925,7 @@ const FRONTEND_HTML = `
                 offsetY += pos.screenY - lastMouseY;
                 draw();
                 emitCursorPosition();
-            } else if (isPainting && (currentTool === 'brush' || currentTool === 'eraser')) {
-                // Sécurité stricte pendant le mouvement
+            } else if (isPainting && currentTool !== 'none') {
                 if (Date.now() < blockDrawingUntil) {
                     isPainting = false;
                     return;
@@ -920,34 +940,40 @@ const FRONTEND_HTML = `
         window.addEventListener('mousemove', handleMove);
         window.addEventListener('touchmove', handleMove, {passive: false});
 
-        window.addEventListener('mouseup', () => { isPanning = false; isPainting = false; });
+        window.addEventListener('mouseup', () => { 
+            isPanning = false; 
+            isPainting = false; 
+            if (currentTool === 'none') wrapper.style.cursor = 'grab';
+        });
+        
         canvas.addEventListener('mouseleave', () => { hoverX = -1; hoverY = -1; draw(); });
 
         window.addEventListener('touchend', (e) => {
-            // Un doigt se retire. Était-on en train de naviguer ?
-            if (e.touches.length < 2 && (isPinching || isPanning)) {
-                blockDrawingUntil = Date.now() + 500; // Déclenche la période de grâce de 0.5 sec finale !
+            if (e.touches && e.touches.length < 2 && (isPinching || isPanning)) {
+                blockDrawingUntil = Date.now() + 500; 
                 isPinching = false;
                 
                 if (e.touches.length === 1) {
-                    isPainting = false;
-                    isPanning = false;
+                    if (currentTool === 'none') {
+                        isPanning = true;
+                        isPainting = false;
+                    } else {
+                        isPainting = false;
+                        isPanning = false;
+                    }
                     lastMouseX = e.touches[0].clientX;
                     lastMouseY = e.touches[0].clientY;
                 }
             }
 
-            // Était-ce juste un clic rapide (1 doigt) pour poser un pixel ?
             if (isPainting && !isMoved && e.target === canvas && e.changedTouches) {
-                // Ultime vérification du verrou de sécurité
-                if (Date.now() >= blockDrawingUntil) {
+                if (Date.now() >= blockDrawingUntil && currentTool !== 'none') {
                     const pos = getEventData({clientX: e.changedTouches[0].clientX, clientY: e.changedTouches[0].clientY});
                     triggerTool(pos.canvasX, pos.canvasY);
                     emitCursorPosition();
                 }
             }
 
-            // Plus aucun doigt sur l'écran
             if (!e.touches || e.touches.length === 0) {
                 isPanning = false; 
                 isPainting = false;
@@ -1010,7 +1036,7 @@ const FRONTEND_HTML = `
 
                 const w = canvas.width;
                 const h = canvas.height;
-                const margin = 25; // Distance depuis le bord de l'écran
+                const margin = 25; 
                 const cx = w / 2;
                 const cy = h / 2;
 
@@ -1022,11 +1048,9 @@ const FRONTEND_HTML = `
                     let drawY = screenY;
                     let isOffscreen = false;
 
-                    // Vérifie si le joueur est en dehors de notre écran
                     if (screenX < 0 || screenX > w || screenY < 0 || screenY > h) {
                         isOffscreen = true;
                         
-                        // Calcul mathématique pour coller l'icône sur le bord de l'écran dans sa direction
                         const dx = screenX - cx;
                         const dy = screenY - cy;
                         const maxDx = (w / 2) - margin;
@@ -1041,7 +1065,6 @@ const FRONTEND_HTML = `
                     }
 
                     if (isOffscreen) {
-                        // Dessin de l'indicateur bord d'écran (bulle semi-transparente)
                         ctx.globalAlpha = 0.6;
                         ctx.font = "16px Arial";
                         ctx.beginPath();
@@ -1051,7 +1074,6 @@ const FRONTEND_HTML = `
                         ctx.fillText(c.emoji || '👽', drawX, drawY);
                         ctx.globalAlpha = 1.0;
                     } else {
-                        // Dessin du joueur normal (sur la toile)
                         ctx.font = Math.max(20, scale * 2) + "px Arial";
                         ctx.fillText(c.emoji || '👽', drawX, drawY);
                     }
@@ -1273,4 +1295,3 @@ const FRONTEND_HTML = `
     </script>
 </body>
 </html>
-`;
