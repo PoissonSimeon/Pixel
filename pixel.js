@@ -423,7 +423,8 @@ const FRONTEND_HTML = `
 
                 <div class="hud-group">
                     <button id="btnPseudo" class="tool-btn">Pseudo: 👽</button>
-                    <button id="btnCursors" class="tool-btn">Joueurs</button>
+                    <!-- On ajoute la classe 'active' pour l'allumer par défaut -->
+                    <button id="btnCursors" class="tool-btn active">Joueurs</button>
                     <button id="exportBtn" class="tool-btn">Exporter</button>
                 </div>
             </div>
@@ -511,7 +512,8 @@ const FRONTEND_HTML = `
         let totalPendingBatch = 0;
         let progressHideTimeout;
 
-        let showCursors = false;
+        // On passe la variable à true pour afficher les joueurs par défaut
+        let showCursors = true;
         const otherCursors = new Map(); 
         let lastCursorSendTime = 0;
         let serverSessionKey = 0; 
@@ -1003,14 +1005,56 @@ const FRONTEND_HTML = `
             ctx.restore();
 
             if (showCursors) {
-                ctx.font = Math.max(20, scale * 2) + "px Arial";
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
+
+                const w = canvas.width;
+                const h = canvas.height;
+                const margin = 25; // Distance depuis le bord de l'écran
+                const cx = w / 2;
+                const cy = h / 2;
 
                 for (const [id, c] of otherCursors.entries()) {
                     const screenX = c.x * scale + offsetX + scale/2;
                     const screenY = c.y * scale + offsetY + scale/2;
-                    ctx.fillText(c.emoji || '👽', screenX, screenY);
+
+                    let drawX = screenX;
+                    let drawY = screenY;
+                    let isOffscreen = false;
+
+                    // Vérifie si le joueur est en dehors de notre écran
+                    if (screenX < 0 || screenX > w || screenY < 0 || screenY > h) {
+                        isOffscreen = true;
+                        
+                        // Calcul mathématique pour coller l'icône sur le bord de l'écran dans sa direction
+                        const dx = screenX - cx;
+                        const dy = screenY - cy;
+                        const maxDx = (w / 2) - margin;
+                        const maxDy = (h / 2) - margin;
+                        
+                        let f = 1;
+                        if (dx !== 0) f = Math.min(f, maxDx / Math.abs(dx));
+                        if (dy !== 0) f = Math.min(f, maxDy / Math.abs(dy));
+                        
+                        drawX = cx + dx * f;
+                        drawY = cy + dy * f;
+                    }
+
+                    if (isOffscreen) {
+                        // Dessin de l'indicateur bord d'écran (bulle semi-transparente)
+                        ctx.globalAlpha = 0.6;
+                        ctx.font = "16px Arial";
+                        ctx.beginPath();
+                        ctx.arc(drawX, drawY, 14, 0, Math.PI * 2);
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                        ctx.fill();
+                        ctx.fillText(c.emoji || '👽', drawX, drawY);
+                        ctx.globalAlpha = 1.0;
+                    } else {
+                        // Dessin du joueur normal (sur la toile)
+                        ctx.font = Math.max(20, scale * 2) + "px Arial";
+                        ctx.fillText(c.emoji || '👽', drawX, drawY);
+                    }
                 }
             }
         }
