@@ -91,8 +91,9 @@ const server = http.createServer((req, res) => {
 
         let html = FRONTEND_HTML;
         if (isAdmin) {
-            // Injection dynamique du badge Admin uniquement pour toi
-            html = html.replace('<!-- ADMIN_SLOT -->', '<span style="color: #ff9800; font-weight: bold; font-size: 14px; margin-left: 5px;">(pixel)</span>');
+            // Injection dynamique du champ d'annonce et du badge Admin
+            const adminHtml = '<input type="text" id="adminInput" placeholder="Annonce (Entrée)..." maxlength="150"><span style="color: #ff9800; font-weight: bold; font-size: 14px; margin-left: 5px;">(pixel)</span>';
+            html = html.replace('<!-- ADMIN_SLOT -->', adminHtml);
         }
         
         res.end(html);
@@ -166,6 +167,16 @@ wss.on('connection', (ws, req) => {
                 const broadcastMsg = JSON.stringify({ type: 'cursor', id: ws.clientId, x: data.x, y: data.y, emoji: safeEmoji });
                 wss.clients.forEach(client => {
                     if (client !== ws && client.readyState === ws.OPEN) client.send(broadcastMsg);
+                });
+                return;
+            }
+
+            if (data.type === 'admin_shout') {
+                if (!ws.isAdmin) return; // Sécurité stricte : Seul l'admin local a le droit
+                const safeMsg = String(data.msg).substring(0, 150); // Limite de caractères
+                const broadcastMsg = JSON.stringify({ type: 'shout', msg: safeMsg });
+                wss.clients.forEach(client => {
+                    if (client.readyState === ws.OPEN) client.send(broadcastMsg);
                 });
                 return;
             }
@@ -399,6 +410,19 @@ const FRONTEND_HTML = `
         .progress-bar-bg { width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
         #progress-bar-fill { height: 100%; width: 0%; background: #4caf50; transition: width 0.1s linear; }
 
+        /* Styles Admin et Notification */
+        #adminInput { background: rgba(0,0,0,0.5); border: 1px solid #ff9800; color: #ff9800; border-radius: 8px; padding: 0 10px; height: 38px; width: 140px; outline: none; font-weight: bold; font-family: inherit; }
+        #adminInput::placeholder { color: rgba(255, 152, 0, 0.5); }
+        
+        #notification-bubble {
+            position: absolute; top: 120px; left: 50%; transform: translateX(-50%) translateY(-20px);
+            background: rgba(255, 152, 0, 0.95); color: white; padding: 12px 25px; border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 30px; font-weight: bold; font-size: 15px; z-index: 100;
+            box-shadow: 0 15px 40px rgba(0,0,0,0.6); opacity: 0; pointer-events: none;
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); text-align: center; max-width: 80%; word-wrap: break-word;
+        }
+        #notification-bubble.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
         @media (max-width: 768px) {
             #top-info { top: 10px; right: 10px; left: 10px; padding: 6px 12px; font-size: 11px; justify-content: space-between; }
             #status { border: none; padding-left: 0; }
@@ -426,6 +450,8 @@ const FRONTEND_HTML = `
                 <div id="progress-bar-fill"></div>
             </div>
         </div>
+
+        <div id="notification-bubble"></div>
 
         <div id="canvas-wrapper">
             <canvas id="viewCanvas"></canvas>
@@ -548,6 +574,7 @@ const FRONTEND_HTML = `
 
         let totalPendingBatch = 0;
         let progressHideTimeout;
+        let notificationTimeout;
 
         let showCursors = true;
         const otherCursors = new Map(); 
@@ -665,7 +692,17 @@ const FRONTEND_HTML = `
         });
 
         window.addEventListener('keydown', (e) => {
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'EMOJI-PICKER') return;
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'EMOJI-PICKER') {
+                // Gestion de l'envoi de message Admin
+                if (e.target.id === 'adminInput' && e.key === 'Enter') {
+                    const msg = e.target.value.trim();
+                    if (msg && ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify({ type: 'admin_shout', msg: msg }));
+                        e.target.value = '';
+                    }
+                }
+                return;
+            }
             
             const key = e.key.toLowerCase();
             if (key === 'b') {
@@ -1234,6 +1271,16 @@ const FRONTEND_HTML = `
                     pendingQueue = pendingQueue.filter(p => !(p.x === data.x && p.y === data.y && p.shapeStr === shapeStr));
                     draw();
                     if (pendingQueue.length !== lenBefore) updateProgressBar();
+
+                } else if (data.type === 'shout') {
+                    // Affichage de l'annonce globale
+                    const notif = document.getElementById('notification-bubble');
+                    notif.innerText = data.msg;
+                    notif.classList.add('show');
+                    clearTimeout(notificationTimeout);
+                    notificationTimeout = setTimeout(() => {
+                        notif.classList.remove('show');
+                    }, 10000); // Reste affiché 10 secondes
 
                 } else if (data.type === 'error') {
                     // Silencer l'erreur "Trop rapide" si elle est déclenchée par la file d'attente qui se vide
