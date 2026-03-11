@@ -489,7 +489,7 @@ const FRONTEND_HTML = `
 
                     <button id="btnEraser" class="tool-btn">Gomme <span class="kbd-shortcut">&nbsp;(E)</span></button>
                     <div id="color-btn-indicator" style="background-color: #ff0000;"></div>
-                    <button id="btnPipette" class="tool-btn">Pipette</button>
+                    <button id="btnPipette" class="tool-btn">Pipette <span class="kbd-shortcut">&nbsp;(I)</span></button>
                 </div>
 
                 <div class="hud-group">
@@ -717,6 +717,8 @@ const FRONTEND_HTML = `
                 closeAllPanels();
             } else if (key === 'e') {
                 btnEraser.click();
+            } else if (key === 'i') {
+                btnPipette.click();
             }
         });
 
