@@ -15,7 +15,7 @@ const PORT = 80;
 const BOARD_WIDTH = 1000;
 const BOARD_HEIGHT = 1000;
 const BOARD_SIZE = BOARD_WIDTH * BOARD_HEIGHT * 3; 
-const COOLDOWN_MS = 100; 
+const COOLDOWN_MS = 50; // Délai de base ultra-court (50ms) pour vider la file d'attente rapidement
 const BOARD_FILE = path.join(__dirname, 'board.dat');
 
 // --- ÉTAT DU SERVEUR ET SÉCURITÉ ANTI-BOT ---
@@ -25,8 +25,9 @@ const energyMap = new Map();
 const activeIps = new Set(); 
 const patternMap = new Map(); 
 
-const MAX_ENERGY = 800;       
-const REGEN_PER_SEC = 10;     
+// Paramètres de la Jauge d'Endurance massivement augmentés pour les gros pinceaux
+const MAX_ENERGY = 5000;       
+const REGEN_PER_SEC = 100;     
 
 // --- INITIALISATION DU PLATEAU ---
 try {
@@ -229,7 +230,9 @@ wss.on('connection', (ws, req) => {
                 }
 
                 energyData.tokens -= pixelCount;
-                const penalty = COOLDOWN_MS + (pixelCount * 5);
+                
+                // La pénalité n'augmente plus artificiellement avec la taille du pinceau, l'énergie s'en charge.
+                const penalty = COOLDOWN_MS;
                 cooldowns.set(ip, now + penalty);
 
                 const { r, g, b } = hexToRgb(color);
@@ -381,7 +384,6 @@ const FRONTEND_HTML = `
             .hide-mobile { display: none !important; }
             emoji-picker { left: 50%; transform: translateX(-50%); right: auto; width: 95vw; max-width: 350px; }
             
-            /* Sur mobile, on cache les raccourcis clavier pour alléger l'interface */
             .kbd-shortcut { display: none; }
         }
     </style>
@@ -551,7 +553,6 @@ const FRONTEND_HTML = `
 
         // --- GESTION DE L'INTERFACE DES OUTILS ---
         function updateToolUI() {
-            // Retire la sélection de tous les boutons
             btnBrushNormal.classList.remove('active');
             btnBrushCustom.classList.remove('active');
             btnEraser.classList.remove('active');
@@ -567,7 +568,6 @@ const FRONTEND_HTML = `
                     btnPipette.classList.add('active');
                     btnEditBrush.style.display = 'none';
                 } else if (currentTool === 'eraser') {
-                    // Double sélection visuelle : Outil ET Forme (ex: Gomme + 1x1)
                     btnEraser.classList.add('active');
                     if (brushMode === 'normal') {
                         btnBrushNormal.classList.add('active');
@@ -586,15 +586,13 @@ const FRONTEND_HTML = `
                     }
                 }
             }
-            draw(); // Force la mise à jour de la prévisualisation du pinceau
+            draw(); 
         }
 
         btnBrushNormal.addEventListener('click', () => { 
-            // Si le pinceau 1x1 est DEJA actif, on le désactive
             if (currentTool === 'brush' && brushMode === 'normal') {
                 currentTool = 'none';
             } else {
-                // S'il ne l'était pas, on l'active (ou on modifie la forme de la gomme)
                 if (currentTool !== 'eraser') currentTool = 'brush';
                 brushMode = 'normal'; 
             }
@@ -603,7 +601,6 @@ const FRONTEND_HTML = `
         });
         
         btnBrushCustom.addEventListener('click', () => { 
-            // Si le pinceau Custom est DEJA actif, on le désactive
             if (currentTool === 'brush' && brushMode === 'custom') {
                 currentTool = 'none';
                 closeAllPanels();
@@ -612,7 +609,6 @@ const FRONTEND_HTML = `
                 brushMode = 'custom'; 
                 updateToolUI();
                 
-                // Ouvre le menu Custom si on vient de l'activer (sauf si on est en gomme)
                 const isVisible = brushPanel.style.display === 'flex';
                 closeAllPanels();
                 if (!isVisible && currentTool !== 'none') brushPanel.style.display = 'flex';
@@ -627,7 +623,6 @@ const FRONTEND_HTML = `
         });
 
         btnEraser.addEventListener('click', () => { 
-            // Si la gomme est DEJA active, on la désactive
             if (currentTool === 'eraser') {
                 currentTool = 'none';
             } else {
@@ -647,7 +642,6 @@ const FRONTEND_HTML = `
             closeAllPanels();
         });
 
-        // --- RACCOURCIS CLAVIER ---
         window.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'EMOJI-PICKER') return;
             
@@ -680,7 +674,7 @@ const FRONTEND_HTML = `
             if (idx >= 0 && idx < 100) {
                 customBrush[idx] = state;
                 brushEditor.children[idx].className = 'brush-cell' + (state ? ' active' : '');
-                draw(); // Met à jour l'aperçu du pinceau en direct
+                draw(); 
             }
         }
 
@@ -985,7 +979,7 @@ const FRONTEND_HTML = `
                         hoverX = bx;
                         hoverY = by;
                         emitCursorPosition();
-                        needDraw = true; // Redessiner pour la prévisualisation au survol (sur PC)
+                        needDraw = true; 
                     }
                 } else {
                     if (hoverX !== -1 || hoverY !== -1) {
@@ -1010,7 +1004,6 @@ const FRONTEND_HTML = `
                 isMoved = true; 
                 triggerTool(pos.canvasX, pos.canvasY);
             } else if (needDraw && !isPanning && !isPainting) {
-                // Sur PC, dessiner la prévisualisation même si on ne clique pas
                 draw();
             }
             
@@ -1067,13 +1060,11 @@ const FRONTEND_HTML = `
         function pickColor(x, y) {
             const p = offCtx.getImageData(x, y, 1, 1).data;
             
-            // SÉCURITÉ : Conversion RGB vers HEX robuste
             const r = p[0].toString(16).padStart(2, '0');
             const g = p[1].toString(16).padStart(2, '0');
             const b = p[2].toString(16).padStart(2, '0');
             updateColor('#' + r + g + b);
             
-            // FIX : Désactive le mode dessin immédiatement pour ne pas peindre le prochain pixel au moindre mouvement
             isPainting = false;
             isMoved = false;
             
@@ -1105,10 +1096,8 @@ const FRONTEND_HTML = `
                 }
             }
 
-            // Aperçu du pinceau sous la souris (Visible en continu)
             if (hoverX >= 0 && (currentTool === 'brush' || currentTool === 'eraser') && !isPanning && !isPinching) {
                 
-                // Dessin de la couleur réelle avec transparence pour voir à travers
                 ctx.fillStyle = currentTool === 'eraser' ? '#ffffff' : currentColor;
                 ctx.globalAlpha = 0.8; 
 
@@ -1127,12 +1116,10 @@ const FRONTEND_HTML = `
                 ctx.fill();
                 ctx.globalAlpha = 1.0;
 
-                // Contour noir extérieur
                 ctx.lineWidth = Math.max(0.05, 1.5 / scale);
                 ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
                 ctx.stroke();
 
-                // Ligne blanche intérieure pour garantir le contraste sur fond noir
                 ctx.lineWidth = Math.max(0.025, 0.5 / scale);
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
                 ctx.stroke();
@@ -1227,6 +1214,9 @@ const FRONTEND_HTML = `
                     if (pendingQueue.length !== lenBefore) updateProgressBar();
 
                 } else if (data.type === 'error') {
+                    // Silencer l'erreur "Trop rapide" si elle est déclenchée par la file d'attente qui se vide
+                    if (data.msg === 'Trop rapide.' && pendingQueue.length > 0) return;
+                    
                     topInfoEl.style.color = "#ff9800";
                     statusEl.innerText = data.msg || "Ralentissez...";
                     clearTimeout(window.statusTimeout);
@@ -1341,7 +1331,7 @@ const FRONTEND_HTML = `
 
         setInterval(() => {
             const now = Date.now();
-            if (!isPainting && pendingQueue.length > 0 && now - lastSendTime >= 130) {
+            if (!isPainting && pendingQueue.length > 0 && now - lastSendTime >= 60) { // Accéléré à 60ms
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     const p = pendingQueue[0]; 
                     p.retries = (p.retries || 0) + 1;
@@ -1405,4 +1395,3 @@ const FRONTEND_HTML = `
     </script>
 </body>
 </html>
-`;
