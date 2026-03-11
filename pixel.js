@@ -91,9 +91,10 @@ const server = http.createServer((req, res) => {
 
         let html = FRONTEND_HTML;
         if (isAdmin) {
-            // Injection dynamique du champ d'annonce et du badge Admin
+            // Injection dynamique du champ d'annonce et du flag Admin
             const adminHtml = '<input type="text" id="adminInput" placeholder="Annonce (Entrée)..." maxlength="150"><span style="color: #ff9800; font-weight: bold; font-size: 14px; margin-left: 5px;">(pixel)</span>';
             html = html.replace('<!-- ADMIN_SLOT -->', adminHtml);
+            html = html.replace('const IS_ADMIN_CLIENT = false;', 'const IS_ADMIN_CLIENT = true;');
         }
         
         res.end(html);
@@ -434,6 +435,9 @@ const FRONTEND_HTML = `
     </style>
 </head>
 <body>
+    <script>
+        const IS_ADMIN_CLIENT = false; // Sera modifié dynamiquement par le serveur si tu es admin
+    </script>
     <div id="app">
         <div id="top-info">
             <span class="info-segment coords">X:<span id="valX">0</span> Y:<span id="valY">0</span></span>
@@ -1273,17 +1277,15 @@ const FRONTEND_HTML = `
                     if (pendingQueue.length !== lenBefore) updateProgressBar();
 
                 } else if (data.type === 'shout') {
-                    // Affichage de l'annonce globale
                     const notif = document.getElementById('notification-bubble');
                     notif.innerText = data.msg;
                     notif.classList.add('show');
                     clearTimeout(notificationTimeout);
                     notificationTimeout = setTimeout(() => {
                         notif.classList.remove('show');
-                    }, 10000); // Reste affiché 10 secondes
+                    }, 10000); 
 
                 } else if (data.type === 'error') {
-                    // Silencer l'erreur "Trop rapide" si elle est déclenchée par la file d'attente qui se vide
                     if (data.msg === 'Trop rapide.' && pendingQueue.length > 0) return;
                     
                     topInfoEl.style.color = "#ff9800";
@@ -1309,7 +1311,8 @@ const FRONTEND_HTML = `
         }
 
         function placePixel(bx, by) {
-            if (pendingQueue.length > 2000) return;
+            // Seul l'admin a le droit de dépasser la file d'attente de 2000 pixels !
+            if (!IS_ADMIN_CLIENT && pendingQueue.length > 2000) return;
             if (pendingQueue.length === 0) totalPendingBatch = 0;
 
             const colorToUse = currentTool === 'eraser' ? DEFAULT_BG_COLOR : currentColor;
@@ -1400,20 +1403,12 @@ const FRONTEND_HTML = `
 
         setInterval(() => {
             const now = Date.now();
-            if (!isPainting && pendingQueue.length > 0 && now - lastSendTime >= 60) {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    const p = pendingQueue[0]; 
-                    p.retries = (p.retries || 0) + 1;
-
-                    if (p.retries > 150) {
-                        pendingQueue.shift();
-                        draw();
-                        updateProgressBar(); 
-                        return;
-                    }
-
+            
+            if (IS_ADMIN_CLIENT) {
+                // SÉCURITÉ ADMIN : Vidage instantané et complet de la file d'attente (Zéro délai !)
+                while (pendingQueue.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
+                    const p = pendingQueue.shift();
                     const proofToken = (p.x * 7) + (p.y * 3) + serverSessionKey;
-
                     ws.send(JSON.stringify({ 
                         type: 'pixel', 
                         x: p.x, y: p.y, 
@@ -1421,8 +1416,37 @@ const FRONTEND_HTML = `
                         shape: p.shape,
                         token: proofToken
                     }));
-                    
-                    lastSendTime = now;
+                }
+                if (totalPendingBatch > 0 && pendingQueue.length === 0) {
+                    updateProgressBar();
+                    totalPendingBatch = 0; // Remet la barre à zéro proprement pour l'admin
+                }
+            } else {
+                // JOUEUR NORMAL : Attente de fin de tracé (!isPainting) + Délai de 60ms
+                if (!isPainting && pendingQueue.length > 0 && now - lastSendTime >= 60) {
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        const p = pendingQueue[0]; 
+                        p.retries = (p.retries || 0) + 1;
+
+                        if (p.retries > 150) {
+                            pendingQueue.shift();
+                            draw();
+                            updateProgressBar(); 
+                            return;
+                        }
+
+                        const proofToken = (p.x * 7) + (p.y * 3) + serverSessionKey;
+
+                        ws.send(JSON.stringify({ 
+                            type: 'pixel', 
+                            x: p.x, y: p.y, 
+                            color: p.color, 
+                            shape: p.shape,
+                            token: proofToken
+                        }));
+                        
+                        lastSendTime = now;
+                    }
                 }
             }
         }, 10);
