@@ -231,7 +231,7 @@ wss.on('connection', (ws, req) => {
 
                 energyData.tokens -= pixelCount;
                 
-                // La pénalité n'augmente plus artificiellement avec la taille du pinceau, l'énergie s'en charge.
+                // Délai fixe très court pour ne pas ralentir le pinceau custom
                 const penalty = COOLDOWN_MS;
                 cooldowns.set(ip, now + penalty);
 
@@ -1096,7 +1096,7 @@ const FRONTEND_HTML = `
                 }
             }
 
-            if (hoverX >= 0 && (currentTool === 'brush' || currentTool === 'eraser') && !isPanning && !isPinching) {
+            if (hoverX >= 0 && (currentTool === 'brush' || currentTool === 'eraser') && !isPanning && !isPinching && !lastInputWasTouch) {
                 
                 ctx.fillStyle = currentTool === 'eraser' ? '#ffffff' : currentColor;
                 ctx.globalAlpha = 0.8; 
@@ -1331,7 +1331,7 @@ const FRONTEND_HTML = `
 
         setInterval(() => {
             const now = Date.now();
-            if (!isPainting && pendingQueue.length > 0 && now - lastSendTime >= 60) { // Accéléré à 60ms
+            if (!isPainting && pendingQueue.length > 0 && now - lastSendTime >= 60) {
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     const p = pendingQueue[0]; 
                     p.retries = (p.retries || 0) + 1;
@@ -1395,4 +1395,4 @@ const FRONTEND_HTML = `
     </script>
 </body>
 </html>
-;
+`;
