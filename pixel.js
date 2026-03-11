@@ -82,7 +82,20 @@ const server = http.createServer((req, res) => {
 
     if (req.method === 'GET' && req.url === '/') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(FRONTEND_HTML);
+        
+        // SÉCURITÉ : DÉTECTION ADMIN (Vérifie l'absence de Proxy + IP Locale)
+        const isExternal = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'];
+        const remoteIp = req.socket.remoteAddress || '';
+        const isLocalIp = remoteIp === '127.0.0.1' || remoteIp === '::1' || remoteIp.includes('192.168.') || remoteIp.includes('10.') || remoteIp.includes('::ffff:192.168.') || remoteIp.includes('::ffff:127.0.0.1');
+        const isAdmin = !isExternal && isLocalIp;
+
+        let html = FRONTEND_HTML;
+        if (isAdmin) {
+            // Injection dynamique du badge Admin uniquement pour toi
+            html = html.replace('<!-- ADMIN_SLOT -->', '<span style="color: #ff9800; font-weight: bold; font-size: 14px; margin-left: 5px;">(pixel)</span>');
+        }
+        
+        res.end(html);
         return;
     }
 
@@ -103,6 +116,12 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws, req) => {
+    // SÉCURITÉ : DÉTECTION ADMIN POUR LE WEBSOCKET
+    const isExternalHeader = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'];
+    const socketIp = req.socket.remoteAddress || '';
+    const isLocalSocket = socketIp === '127.0.0.1' || socketIp === '::1' || socketIp.includes('192.168.') || socketIp.includes('10.') || socketIp.includes('::ffff:192.168.') || socketIp.includes('::ffff:127.0.0.1');
+    ws.isAdmin = !isExternalHeader && isLocalSocket;
+
     // SÉCURITÉ : Récupération IP via Cloudflare en priorité
     const ip = req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
     ws.clientId = Math.random().toString(36).substring(2, 9); 
@@ -154,20 +173,6 @@ wss.on('connection', (ws, req) => {
             if (data.type === 'pixel') {
                 const now = Date.now();
 
-                const expectedToken = (Math.floor(data.x) * 7) + (Math.floor(data.y) * 3) + ws.sessionKey;
-                if (data.token !== expectedToken) {
-                    return ws.send(JSON.stringify({ type: 'error', msg: 'Client non officiel détecté.' }));
-                }
-
-                if (!activeIps.has(ip)) {
-                    return ws.send(JSON.stringify({ type: 'error', msg: 'Veuillez bouger votre curseur avant de peindre.' }));
-                }
-
-                const nextAllowed = cooldowns.get(ip) || 0;
-                if (now < nextAllowed) {
-                    return ws.send(JSON.stringify({ type: 'error', msg: 'Trop rapide.' }));
-                }
-
                 const x = Math.floor(data.x);
                 const y = Math.floor(data.y);
                 const color = data.color;
@@ -179,61 +184,77 @@ wss.on('connection', (ws, req) => {
                 const pixelCount = (shape && Array.isArray(shape)) ? shape.length : 1;
                 if (pixelCount > 100) return;
 
-                let pData = patternMap.get(ip);
-                if (!pData) { pData = { history: [], warnings: 0 }; patternMap.set(ip, pData); }
-                
-                if (pixelCount === 1) {
-                    pData.history.push({x, y});
-                    if (pData.history.length > 12) {
-                        pData.history.shift();
-                        let isRaster = true;
-                        for (let i = 1; i < 12; i++) {
-                            const prev = pData.history[i-1];
-                            const curr = pData.history[i];
-                            const dx = curr.x - prev.x;
-                            const dy = curr.y - prev.y;
-                            
-                            const isStrictStep = (Math.abs(dx) === 1 && dy === 0) || (Math.abs(dy) === 1 && Math.abs(dx) > 2);
-                            if (!isStrictStep) {
-                                isRaster = false; 
-                                break;
-                            }
-                        }
+                // PRIVILÈGE ADMIN : Ignore toutes les restrictions anti-bot si l'utilisateur est identifié en local !
+                if (!ws.isAdmin) {
+                    const expectedToken = (Math.floor(data.x) * 7) + (Math.floor(data.y) * 3) + ws.sessionKey;
+                    if (data.token !== expectedToken) {
+                        return ws.send(JSON.stringify({ type: 'error', msg: 'Client non officiel détecté.' }));
+                    }
 
-                        if (isRaster) {
-                            pData.warnings++;
-                            pData.history = []; 
-                            if (pData.warnings >= 2) {
-                                energyMap.set(ip, { tokens: 0, lastUpdate: now }); 
-                                cooldowns.set(ip, now + 10000); 
-                                return ws.send(JSON.stringify({ type: 'error', msg: 'Bot détecté (Ligne stricte).' }));
+                    if (!activeIps.has(ip)) {
+                        return ws.send(JSON.stringify({ type: 'error', msg: 'Veuillez bouger votre curseur avant de peindre.' }));
+                    }
+
+                    const nextAllowed = cooldowns.get(ip) || 0;
+                    if (now < nextAllowed) {
+                        return ws.send(JSON.stringify({ type: 'error', msg: 'Trop rapide.' }));
+                    }
+
+                    let pData = patternMap.get(ip);
+                    if (!pData) { pData = { history: [], warnings: 0 }; patternMap.set(ip, pData); }
+                    
+                    if (pixelCount === 1) {
+                        pData.history.push({x, y});
+                        if (pData.history.length > 12) {
+                            pData.history.shift();
+                            let isRaster = true;
+                            for (let i = 1; i < 12; i++) {
+                                const prev = pData.history[i-1];
+                                const curr = pData.history[i];
+                                const dx = curr.x - prev.x;
+                                const dy = curr.y - prev.y;
+                                
+                                const isStrictStep = (Math.abs(dx) === 1 && dy === 0) || (Math.abs(dy) === 1 && Math.abs(dx) > 2);
+                                if (!isStrictStep) {
+                                    isRaster = false; 
+                                    break;
+                                }
                             }
-                        } else {
-                            pData.warnings = Math.max(0, pData.warnings - 0.2); 
+
+                            if (isRaster) {
+                                pData.warnings++;
+                                pData.history = []; 
+                                if (pData.warnings >= 2) {
+                                    energyMap.set(ip, { tokens: 0, lastUpdate: now }); 
+                                    cooldowns.set(ip, now + 10000); 
+                                    return ws.send(JSON.stringify({ type: 'error', msg: 'Bot détecté (Ligne stricte).' }));
+                                }
+                            } else {
+                                pData.warnings = Math.max(0, pData.warnings - 0.2); 
+                            }
                         }
                     }
-                }
 
-                let energyData = energyMap.get(ip);
-                if (!energyData) {
-                    energyData = { tokens: MAX_ENERGY, lastUpdate: now };
-                    energyMap.set(ip, energyData);
-                } else {
-                    const elapsedSec = (now - energyData.lastUpdate) / 1000;
-                    energyData.tokens = Math.min(MAX_ENERGY, energyData.tokens + (elapsedSec * REGEN_PER_SEC));
-                    energyData.lastUpdate = now;
-                }
+                    let energyData = energyMap.get(ip);
+                    if (!energyData) {
+                        energyData = { tokens: MAX_ENERGY, lastUpdate: now };
+                        energyMap.set(ip, energyData);
+                    } else {
+                        const elapsedSec = (now - energyData.lastUpdate) / 1000;
+                        energyData.tokens = Math.min(MAX_ENERGY, energyData.tokens + (elapsedSec * REGEN_PER_SEC));
+                        energyData.lastUpdate = now;
+                    }
 
-                if (energyData.tokens < pixelCount) {
-                    cooldowns.set(ip, now + 2000);
-                    return ws.send(JSON.stringify({ type: 'error', msg: 'Endurance épuisée.' }));
-                }
+                    if (energyData.tokens < pixelCount) {
+                        cooldowns.set(ip, now + 2000);
+                        return ws.send(JSON.stringify({ type: 'error', msg: 'Endurance épuisée.' }));
+                    }
 
-                energyData.tokens -= pixelCount;
-                
-                // Délai fixe très court pour ne pas ralentir le pinceau custom
-                const penalty = COOLDOWN_MS;
-                cooldowns.set(ip, now + penalty);
+                    energyData.tokens -= pixelCount;
+                    
+                    const penalty = COOLDOWN_MS;
+                    cooldowns.set(ip, now + penalty);
+                }
 
                 const { r, g, b } = hexToRgb(color);
                 
@@ -444,6 +465,7 @@ const FRONTEND_HTML = `
                     <button id="btnPseudo" class="tool-btn">Pseudo: 👽</button>
                     <button id="btnCursors" class="tool-btn active">Joueurs</button>
                     <button id="exportBtn" class="tool-btn">Exporter</button>
+                    <!-- ADMIN_SLOT -->
                 </div>
             </div>
         </div>
