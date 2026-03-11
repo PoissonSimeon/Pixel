@@ -165,7 +165,8 @@ wss.on('connection', (ws, req) => {
                     safeEmoji = Array.from(data.emoji).slice(0, 2).join(''); 
                 }
 
-                const broadcastMsg = JSON.stringify({ type: 'cursor', id: ws.clientId, x: data.x, y: data.y, emoji: safeEmoji });
+                // INJECTION DU STATUT ADMIN pour le halo
+                const broadcastMsg = JSON.stringify({ type: 'cursor', id: ws.clientId, x: data.x, y: data.y, emoji: safeEmoji, isAdmin: ws.isAdmin });
                 wss.clients.forEach(client => {
                     if (client !== ws && client.readyState === ws.OPEN) client.send(broadcastMsg);
                 });
@@ -1224,12 +1225,22 @@ const FRONTEND_HTML = `
                         drawY = cy + dy * f;
                     }
 
+                    // --- EFFET HALO ADMIN ---
+                    if (c.isAdmin) {
+                        ctx.shadowColor = '#ffcc00'; // Halo jaune doré
+                        ctx.shadowBlur = 20;         // Intensité du halo
+                    } else {
+                        ctx.shadowColor = 'transparent';
+                        ctx.shadowBlur = 0;
+                    }
+
                     if (isOffscreen) {
                         ctx.globalAlpha = 0.6;
                         ctx.font = "16px Arial";
                         ctx.beginPath();
                         ctx.arc(drawX, drawY, 14, 0, Math.PI * 2);
-                        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                        // Bulle orangée si Admin, noire sinon
+                        ctx.fillStyle = c.isAdmin ? 'rgba(255, 152, 0, 0.8)' : 'rgba(0, 0, 0, 0.5)';
                         ctx.fill();
                         ctx.fillText(c.emoji || '👽', drawX, drawY);
                         ctx.globalAlpha = 1.0;
@@ -1237,6 +1248,10 @@ const FRONTEND_HTML = `
                         ctx.font = Math.max(20, scale * 2) + "px Arial";
                         ctx.fillText(c.emoji || '👽', drawX, drawY);
                     }
+                    
+                    // Réinitialisation de l'ombre pour éviter d'affecter les autres dessins
+                    ctx.shadowColor = 'transparent';
+                    ctx.shadowBlur = 0;
                 }
             }
         }
@@ -1252,7 +1267,8 @@ const FRONTEND_HTML = `
                 if (data.type === 'auth') {
                     serverSessionKey = data.key;
                 } else if (data.type === 'cursor') {
-                    otherCursors.set(data.id, { x: data.x, y: data.y, emoji: data.emoji, time: Date.now() });
+                    // Sauvegarde du flag isAdmin avec les infos du curseur
+                    otherCursors.set(data.id, { x: data.x, y: data.y, emoji: data.emoji, time: Date.now(), isAdmin: data.isAdmin });
                     if (showCursors) draw();
                 } else if (data.type === 'cursor_remove') {
                     otherCursors.delete(data.id); 
@@ -1311,7 +1327,6 @@ const FRONTEND_HTML = `
         }
 
         function placePixel(bx, by) {
-            // Seul l'admin a le droit de dépasser la file d'attente de 2000 pixels !
             if (!IS_ADMIN_CLIENT && pendingQueue.length > 2000) return;
             if (pendingQueue.length === 0) totalPendingBatch = 0;
 
@@ -1405,7 +1420,6 @@ const FRONTEND_HTML = `
             const now = Date.now();
             
             if (IS_ADMIN_CLIENT) {
-                // SÉCURITÉ ADMIN : Vidage instantané et complet de la file d'attente (Zéro délai !)
                 while (pendingQueue.length > 0 && ws && ws.readyState === WebSocket.OPEN) {
                     const p = pendingQueue.shift();
                     const proofToken = (p.x * 7) + (p.y * 3) + serverSessionKey;
@@ -1419,10 +1433,9 @@ const FRONTEND_HTML = `
                 }
                 if (totalPendingBatch > 0 && pendingQueue.length === 0) {
                     updateProgressBar();
-                    totalPendingBatch = 0; // Remet la barre à zéro proprement pour l'admin
+                    totalPendingBatch = 0; 
                 }
             } else {
-                // JOUEUR NORMAL : Attente de fin de tracé (!isPainting) + Délai de 60ms
                 if (!isPainting && pendingQueue.length > 0 && now - lastSendTime >= 60) {
                     if (ws && ws.readyState === WebSocket.OPEN) {
                         const p = pendingQueue[0]; 
