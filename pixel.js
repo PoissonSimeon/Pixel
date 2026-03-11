@@ -1395,3 +1395,4 @@ const FRONTEND_HTML = `
     </script>
 </body>
 </html>
+;
